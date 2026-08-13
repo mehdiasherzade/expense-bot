@@ -1,3 +1,7 @@
 python-telegram-bot==20.7
-supabase>=2.5.0,<3.0.0
+supabase==1.0.3
+gotrue==1.0.0
+postgrest==0.10.6
+realtime==1.0.0
+storage3==0.5.2
 python-dotenv==1.0.0
