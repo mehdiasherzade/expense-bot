@@ -2,6 +2,9 @@ import os
 import re
 from datetime import datetime
 
+from openpyxl import Workbook
+from io import BytesIO
+
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
@@ -70,6 +73,7 @@ MAIN_KEYBOARD = [
     ["📅 گزارش ماه", "📋 هزینه‌های اخیر"],
     ["📈 گزارش پیشرفته", "📅 گزارش تاریخ"],
     ["🗑️ حذف/ویرایش", "⚙️ تنظیمات"],
+    ["📊 خروجی اکسل"],  # دکمه جدید
 ]
 
 
@@ -1951,7 +1955,57 @@ async def settings_menu_callback(
         ),
     )
 
-
+async def export_excel(update, context):
+    user_id = update.effective_user.id
+    if not is_allowed(user_id):
+        return
+    
+    # گرفتن تاریخ ماه جاری
+    month = datetime.now().strftime("%Y-%m")
+    
+    # گرفتن هزینه‌های ماه از دیتابیس
+    response = supabase.table("expenses").select("*").eq("user_id", user_id).like("created_at", f"{month}%").execute()
+    rows = response.data
+    
+    if not rows:
+        await update.message.reply_text("📊 این ماه هنوز هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
+        return
+    
+    # ایجاد فایل Excel
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "هزینه‌ها"
+    
+    # عنوان ستون‌ها
+    ws.append(["ردیف", "دسته‌بندی", "مبلغ (تومان)", "توضیحات", "تاریخ"])
+    
+    # پر کردن داده‌ها
+    total = 0
+    for i, row in enumerate(rows, 1):
+        ws.append([
+            i,
+            row["category"],
+            row["amount"],
+            row["description"],
+            row["created_at"][:10]
+        ])
+        total += row["amount"]
+    
+    # جمع کل
+    ws.append([])
+    ws.append(["", "", total, "جمع کل", ""])
+    
+    # ذخیره در حافظه
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    # ارسال فایل
+    await update.message.reply_document(
+        document=output,
+        filename=f"هزینه‌های_{month}.xlsx",
+        caption=f"📊 گزارش هزینه‌های ماه {month}\n💰 مجموع: {total:,} تومان"
+    )
 # ============================================================
 # هندلر اصلی پیام‌ها
 # ============================================================
@@ -1975,6 +2029,10 @@ async def handle_message(
         update.message.text.strip()
     )
 
+    if message == "📊 خروجی اکسل":
+    await export_excel(update, context)
+    return
+    
     # --------------------------------------------------------
     # بازگشت
     # --------------------------------------------------------
