@@ -53,7 +53,6 @@ DEFAULT_CATEGORIES = [
 ]
 
 def init_db():
-    """ایجاد جداول در Supabase اگر وجود نداشته باشند"""
     try:
         supabase.table("expenses").select("*").limit(1).execute()
     except:
