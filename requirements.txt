@@ -5,4 +5,3 @@ postgrest==0.16.11
 realtime==1.0.6
 storage3==0.7.7
 python-dotenv==1.0.0
-httpx==0.24.0
