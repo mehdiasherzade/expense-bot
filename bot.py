@@ -99,8 +99,29 @@ def init_db():
 # توابع دیتابیس
 # ==========================================
 def get_categories():
-    response = supabase.table("categories").select("*").order("id").execute()
-    return [(row["id"], row["name"]) for row in response.data]
+    response = supabase.table("categories").select("*").execute()
+
+    desired_order = [
+        "🍔 غذا",
+        "☕ کافه",
+        "🚕 حمل‌ونقل",
+        "🛒 خرید",
+        "🏠 خانه",
+        "🎮 تفریح",
+        "💊 درمان",
+        "💳 قبض",
+        "📦 سایر",
+    ]
+
+    categories = [(row["id"], row["name"]) for row in response.data]
+
+    order_map = {name: i for i, name in enumerate(desired_order)}
+
+    categories.sort(
+        key=lambda item: order_map.get(item[1], len(desired_order))
+    )
+
+    return categories
 
 def category_exists(name):
     response = supabase.table("categories").select("id").eq("name", name).execute()
