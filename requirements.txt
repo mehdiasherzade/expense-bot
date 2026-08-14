@@ -3,4 +3,5 @@ supabase==2.30.1
 python-dotenv==1.0.0
 openpyxl==3.1.2
 httpx==0.27.2
+jdatetime
 pip==26.2.1
