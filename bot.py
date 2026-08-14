@@ -1596,6 +1596,68 @@ async def keyword_add_callback(update, context):
         "کلمه را می‌خواهی به کدام دسته اضافه کنی؟",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
+async def keyword_edit_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    response = (
+        supabase
+        .table("category_keywords")
+        .select("id, keyword")
+        .order("id")
+        .execute()
+    )
+
+    keywords = response.data or []
+
+    if not keywords:
+        await query.edit_message_text(
+            "✏️ کلمه‌ای برای ویرایش وجود ندارد.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="manage_keywords")]
+            ])
+        )
+        return
+
+    buttons = []
+
+    for row in keywords:
+        buttons.append([
+            InlineKeyboardButton(
+                row["keyword"],
+                callback_data=f"keyword_edit_select:{row['id']}"
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton("🔙 بازگشت", callback_data="manage_keywords")
+    ])
+
+    await query.edit_message_text(
+        "✏️ کلمه‌ای که می‌خواهی ویرایش کنی را انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+async def keyword_edit_select_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    keyword_id = int(query.data.split(":")[1])
+
+    context.user_data["keyword_edit_id"] = keyword_id
+
+    await query.edit_message_text(
+        "✏️ ویرایش کلمه\n\n"
+        "نام جدید کلمه را وارد کن:\n\n"
+        "مثال: برگر"
+    )
 async def keyword_add_category_callback(update, context):
     query = update.callback_query
     await query.answer()
@@ -3061,6 +3123,36 @@ async def handle_message(update, context):
         await go_back(update, context)
         return
         # ==========================================
+    # ویرایش کلمه کلیدی
+    # ==========================================
+    if context.user_data.get("keyword_edit_id"):
+        keyword_id = context.user_data["keyword_edit_id"]
+
+        if not message:
+            return
+
+        response = (
+            supabase
+            .table("category_keywords")
+            .update({"keyword": message})
+            .eq("id", keyword_id)
+            .execute()
+        )
+
+        if response.data:
+            context.user_data.clear()
+            await update.message.reply_text(
+                f"✅ کلمه به «{message}» تغییر کرد.",
+                reply_markup=main_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                "❌ ویرایش کلمه انجام نشد.",
+                reply_markup=back_keyboard()
+            )
+
+        return
+        # ==========================================
     # افزودن کلمه کلیدی دسته‌بندی
     # ==========================================
     if context.user_data.get("keyword_add_category_id"):
@@ -3578,6 +3670,14 @@ def main():
     app.add_handler(CallbackQueryHandler(
         keyword_add_category_callback,
         pattern=r"^keyword_add_cat:\d+$"
+    ))
+    app.add_handler(CallbackQueryHandler(
+    keyword_edit_callback,
+    pattern=r"^keyword_edit$"
+    ))
+    app.add_handler(CallbackQueryHandler(
+    keyword_edit_select_callback,
+    pattern=r"^keyword_edit_select:\d+$"
     ))
     # ==========================================
     # مدیریت هزینه‌های سریع
