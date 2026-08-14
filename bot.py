@@ -1658,6 +1658,135 @@ async def keyword_edit_select_callback(update, context):
         "نام جدید کلمه را وارد کن:\n\n"
         "مثال: برگر"
     )
+async def keyword_delete_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    response = (
+        supabase
+        .table("category_keywords")
+        .select("id, keyword")
+        .order("id")
+        .execute()
+    )
+
+    keywords = response.data or []
+
+    if not keywords:
+        await query.edit_message_text(
+            "🗑️ کلمه‌ای برای حذف وجود ندارد.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="manage_keywords")]
+            ])
+        )
+        return
+
+    buttons = []
+
+    for row in keywords:
+        buttons.append([
+            InlineKeyboardButton(
+                f"🗑️ {row['keyword']}",
+                callback_data=f"keyword_delete_select:{row['id']}"
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton("🔙 بازگشت", callback_data="manage_keywords")
+    ])
+
+    await query.edit_message_text(
+        "🗑️ کلمه‌ای که می‌خواهی حذف کنی را انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+async def keyword_delete_select_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    keyword_id = int(query.data.split(":")[1])
+
+    response = (
+        supabase
+        .table("category_keywords")
+        .select("keyword")
+        .eq("id", keyword_id)
+        .execute()
+    )
+
+    if not response.data:
+        await query.edit_message_text(
+            "❌ این کلمه پیدا نشد.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="manage_keywords")]
+            ])
+        )
+        return
+
+    keyword = response.data[0]["keyword"]
+
+    buttons = [
+        [
+            InlineKeyboardButton(
+                "✅ بله، حذف کن",
+                callback_data=f"keyword_delete_confirm:{keyword_id}"
+            ),
+            InlineKeyboardButton(
+                "❌ لغو",
+                callback_data="manage_keywords"
+            )
+        ]
+    ]
+
+    await query.edit_message_text(
+        f"⚠️ مطمئنی می‌خواهی «{keyword}» حذف شود؟",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+async def keyword_delete_confirm_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    keyword_id = int(query.data.split(":")[1])
+
+    response = (
+        supabase
+        .table("category_keywords")
+        .delete()
+        .eq("id", keyword_id)
+        .execute()
+    )
+
+    if response.data:
+        await query.edit_message_text(
+            "✅ کلمه با موفقیت حذف شد.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    "🔙 بازگشت به کلمات",
+                    callback_data="manage_keywords"
+                )]
+            ])
+        )
+    else:
+        await query.edit_message_text(
+            "❌ حذف کلمه انجام نشد.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="manage_keywords"
+                )]
+            ])
+        )
 async def keyword_add_category_callback(update, context):
     query = update.callback_query
     await query.answer()
@@ -3678,6 +3807,18 @@ def main():
     app.add_handler(CallbackQueryHandler(
     keyword_edit_select_callback,
     pattern=r"^keyword_edit_select:\d+$"
+    ))
+    app.add_handler(CallbackQueryHandler(
+    keyword_delete_callback,
+    pattern=r"^keyword_delete$"
+    ))
+    app.add_handler(CallbackQueryHandler(
+    keyword_delete_select_callback,
+    pattern=r"^keyword_delete_select:\d+$"
+    ))
+    app.add_handler(CallbackQueryHandler(
+    keyword_delete_confirm_callback,
+    pattern=r"^keyword_delete_confirm:\d+$"
     ))
     # ==========================================
     # مدیریت هزینه‌های سریع
