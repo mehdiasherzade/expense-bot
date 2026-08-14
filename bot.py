@@ -1565,7 +1565,7 @@ async def manage_keywords(update, context):
         text,
         reply_markup=InlineKeyboardMarkup(buttons)
     )
-    async def keyword_add_callback(update, context):
+async def keyword_add_callback(update, context):
     query = update.callback_query
     await query.answer()
 
