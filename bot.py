@@ -1493,9 +1493,13 @@ async def edit_page_callback(update, context):
 async def settings(update, context):
     buttons = [
         [InlineKeyboardButton("🏷️ دسته‌بندی‌ها", callback_data="manage_categories")],
+        [InlineKeyboardButton("🔑 کلمات دسته‌بندی", callback_data="manage_keywords")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")],
     ]
-    await update.message.reply_text("⚙️ تنظیمات", reply_markup=InlineKeyboardMarkup(buttons))
+    await update.message.reply_text(
+        "⚙️ تنظیمات",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 async def manage_categories(update, context):
     query = update.callback_query
