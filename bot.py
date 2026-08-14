@@ -1565,6 +1565,51 @@ async def manage_keywords(update, context):
         text,
         reply_markup=InlineKeyboardMarkup(buttons)
     )
+    async def keyword_add_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    categories = get_categories()
+
+    buttons = []
+    for category_id, name in categories:
+        buttons.append([
+            InlineKeyboardButton(
+                name,
+                callback_data=f"keyword_add_cat:{category_id}"
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton("🔙 بازگشت", callback_data="manage_keywords")
+    ])
+
+    await query.edit_message_text(
+        "➕ افزودن کلمه\n\n"
+        "کلمه را می‌خواهی به کدام دسته اضافه کنی؟",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+async def keyword_add_category_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    category_id = int(query.data.split(":")[1])
+
+    context.user_data["keyword_add_category_id"] = category_id
+
+    await query.edit_message_text(
+        "➕ افزودن کلمه\n\n"
+        "کلمه جدید را وارد کن:\n\n"
+        "مثال: پیتزا"
+    )    
 async def ignore_callback(update, context):
     """دکمه‌های غیرفعال (شماره صفحه)"""
     query = update.callback_query
@@ -3012,7 +3057,53 @@ async def handle_message(update, context):
     if message == "🔙 بازگشت":
         await go_back(update, context)
         return
-    
+        # ==========================================
+    # افزودن کلمه کلیدی دسته‌بندی
+    # ==========================================
+    if context.user_data.get("keyword_add_category_id"):
+        category_id = context.user_data["keyword_add_category_id"]
+
+        if not message:
+            return
+
+        # بررسی تکراری نبودن کلمه
+        response = (
+            supabase
+            .table("category_keywords")
+            .select("id")
+            .eq("keyword", message)
+            .eq("category_id", category_id)
+            .execute()
+        )
+
+        if response.data:
+            await update.message.reply_text(
+                "❌ این کلمه قبلاً برای این دسته ثبت شده.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        try:
+            supabase.table("category_keywords").insert({
+                "keyword": message,
+                "category_id": category_id
+            }).execute()
+
+            context.user_data.clear()
+
+            await update.message.reply_text(
+                f"✅ کلمه «{message}» با موفقیت اضافه شد.",
+                reply_markup=main_keyboard()
+            )
+
+        except Exception as e:
+            logger.error(f"خطا در افزودن کلمه کلیدی: {e}")
+            await update.message.reply_text(
+                "❌ خطا در افزودن کلمه.",
+                reply_markup=back_keyboard()
+            )
+
+        return
     # ==========================================
     # مدیریت دسته‌بندی‌ها
     # ==========================================
@@ -3480,7 +3571,11 @@ def main():
     app.add_handler(CallbackQueryHandler(report_page_callback, pattern=r"^report_page:\d+$"))
     app.add_handler(CallbackQueryHandler(date_page_callback, pattern=r"^date_page:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
+    app.add_handler(CallbackQueryHandler(keyword_add_callback, pattern=r"^keyword_add$"))
+    app.add_handler(CallbackQueryHandler(
+        keyword_add_category_callback,
+        pattern=r"^keyword_add_cat:\d+$"
+    ))
     # ==========================================
     # مدیریت هزینه‌های سریع
     # ==========================================
