@@ -54,8 +54,8 @@ class HealthHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
-            
-        def do_HEAD(self):
+
+    def do_HEAD(self):
         if self.path == "/health":
             self.send_response(200)
             self.send_header("Content-type", "text/plain; charset=utf-8")
@@ -63,15 +63,9 @@ class HealthHandler(BaseHTTPRequestHandler):
         else:
             self.send_response(404)
             self.end_headers()
+
     def log_message(self, format, *args):
         return
-
-
-def run_health_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    print(f"Health server running on port {port}")
-    server.serve_forever()
 # ==========================================
 # منوی اصلی
 # ==========================================
