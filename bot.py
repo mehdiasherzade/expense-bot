@@ -3,6 +3,7 @@ import re
 import logging
 import jdatetime
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
@@ -11,6 +12,7 @@ from telegram.request import HTTPXRequest
 from openpyxl import Workbook
 from io import BytesIO
 
+TEHRAN_TZ = ZoneInfo("Asia/Tehran")
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
@@ -39,11 +41,9 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # منوی اصلی
 # ==========================================
 MAIN_KEYBOARD = [
-    ["➕ ثبت هزینه", "📊 گزارش امروز"],
-    ["📅 گزارش ماه", "📋 هزینه‌های اخیر"],
-    ["📈 گزارش پیشرفته", "📅 گزارش تاریخ"],
-    ["🗑️ حذف/ویرایش", "⚙️ تنظیمات"],
-    ["📊 خروجی اکسل"],
+    ["📥 ثبت هزینه", "🧾 هزینه‌های سریع"],
+    ["📊 گزارش‌ها", "✏️ مدیریت هزینه‌ها"],
+    ["📤 خروجی اکسل", "⚙️ تنظیمات"],
 ]
 
 def main_keyboard():
@@ -59,6 +59,20 @@ DEFAULT_CATEGORIES = [
     "🍔 غذا", "🚕 حمل‌ونقل", "🛒 خرید", "🏠 خانه",
     "🎮 تفریح", "💊 درمان", "💳 قبض", "📦 سایر"
 ]
+
+# ==========================================
+# کلمات کلیدی برای تشخیص خودکار دسته‌بندی
+# ==========================================
+CATEGORY_KEYWORDS = {
+    "🍔 غذا": ["ناهار", "شام", "صبحانه", "غذا", "پیتزا", "برگر", "کباب", "ساندویچ", "فست‌فود", "رستوران"],
+    "🚕 حمل‌ونقل": ["تاکسی", "اتوبوس", "مترو", "اسنپ", "قطار", "بی‌آرتی", "پمپ بنزین"],
+    "🛒 خرید": ["خرید", "فروشگاه", "سوپرمارکت", "لباس", "کفش", "لوازم", "خواربار"],
+    "🏠 خانه": ["خانه", "اجاره", "تعمیرات", "مبلمان", "لوازم خانگی"],
+    "🎮 تفریح": ["تفریح", "سینما", "بازی", "کنسرت", "ورزش", "باشگاه"],
+    "💊 درمان": ["درمان", "دارو", "دکتر", "بیمارستان", "آزمایشگاه", "مطب"],
+    "💳 قبض": ["قبض برق", "برق", "قبض گاز", "قبض اب", "تلفن", "اینترنت", "موبایل"],
+    "☕ کافه": ["کافه", "قهوه", "چای", "نسکافه", "کاپوچینو", "ابمیوه"],
+}
 
 def init_db():
     try:
@@ -113,6 +127,36 @@ def delete_category(category_id):
     supabase.table("expenses").update({"category": "📦 سایر"}).eq("category", category_name).execute()
     supabase.table("categories").delete().eq("id", category_id).execute()
     return True
+    
+# ==========================================
+# توابع دیتابیس برای هزینه‌های سریع
+# ==========================================
+def add_quick_expense(user_id, name, amount, category):
+    """افزودن هزینه سریع جدید"""
+    data = {
+        "user_id": user_id,
+        "name": name,
+        "amount": amount,
+        "category": category,
+        "created_at": datetime.now(TEHRAN_TZ).isoformat()
+    }
+    supabase.table("quick_expenses").insert(data).execute()
+
+def get_quick_expenses(user_id):
+    """دریافت لیست هزینه‌های سریع کاربر"""
+    response = supabase.table("quick_expenses").select("*").eq("user_id", user_id).order("id").execute()
+    return response.data
+
+def delete_quick_expense(user_id, expense_id):
+    """حذف هزینه سریع"""
+    response = supabase.table("quick_expenses").delete().eq("id", expense_id).eq("user_id", user_id).execute()
+    return len(response.data) > 0
+
+def update_quick_expense(user_id, expense_id, name, amount, category):
+    """ویرایش هزینه سریع"""
+    data = {"name": name, "amount": amount, "category": category}
+    response = supabase.table("quick_expenses").update(data).eq("id", expense_id).eq("user_id", user_id).execute()
+    return len(response.data) > 0    
 
 def add_expense(user_id, amount, description, category):
     data = {
@@ -120,7 +164,7 @@ def add_expense(user_id, amount, description, category):
         "amount": amount,
         "description": description,
         "category": category,
-        "created_at": datetime.now().isoformat()
+        "created_at": datetime.now(TEHRAN_TZ).isoformat()
     }
     supabase.table("expenses").insert(data).execute()
 
@@ -230,6 +274,15 @@ def parse_expense_text(message):
         return None
     return amount, description
 
+def detect_category(description):
+    """تشخیص خودکار دسته‌بندی بر اساس توضیحات"""
+    description_lower = description.lower()
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in description_lower:
+                return category
+    return "📦 سایر"  # دسته‌بندی پیش‌فرض
+
 # ==========================================
 # تابع تبدیل تاریخ میلادی به شمسی
 # ==========================================
@@ -247,6 +300,126 @@ def to_jalali(date_str):
     except:
         # اگر خطایی رخ داد، همان تاریخ میلادی را برگردان
         return date_str[:10] if len(date_str) >= 10 else ""
+
+
+def parse_date_input(date_text):
+    """
+    تنها موتور تشخیص تاریخ در کل ربات.
+
+    ورودی:
+        1405-05-23
+        1405/05/23
+        1405.05.23
+        ۲۰۲۶-۰۸-۱۴
+        2026-08-14
+
+    خروجی:
+        تاریخ میلادی با فرمت YYYY-MM-DD
+        یا None
+    """
+
+    if not date_text:
+        return None
+
+    date_text = normalize_digits(str(date_text).strip())
+
+    # یکسان‌سازی جداکننده‌ها
+    date_text = (
+        date_text
+        .replace("/", "-")
+        .replace(".", "-")
+        .replace("\\", "-")
+    )
+
+    # حذف فاصله اطراف -
+    date_text = re.sub(r"\s*-\s*", "-", date_text)
+
+    parts = date_text.split("-")
+
+    if len(parts) != 3:
+        return None
+
+    try:
+        year, month, day = map(int, parts)
+    except ValueError:
+        return None
+
+    try:
+        # میلادی
+        if 1700 <= year <= 3000:
+            gregorian = datetime(year, month, day)
+            return gregorian.strftime("%Y-%m-%d")
+
+        # شمسی
+        if 1200 <= year <= 1600:
+            jalali = jdatetime.date(year, month, day)
+            gregorian = jalali.togregorian()
+            return gregorian.strftime("%Y-%m-%d")
+
+    except (ValueError, TypeError):
+        return None
+
+    return None
+
+def get_date_info(date_text):
+    """
+    اطلاعات کامل تاریخ را بر اساس parse_date_input برمی‌گرداند.
+
+    تمام بخش‌های ربات باید برای تشخیص تاریخ
+    از parse_date_input استفاده کنند.
+    """
+
+    if not date_text:
+        return None
+
+    original = normalize_digits(str(date_text).strip())
+
+    gregorian = parse_date_input(original)
+
+    if not gregorian:
+        return None
+
+    try:
+        gregorian_date = datetime.strptime(
+            gregorian,
+            "%Y-%m-%d"
+        )
+
+        jalali_date = jdatetime.date.fromgregorian(
+            date=gregorian_date
+        )
+
+        jalali = (
+            f"{jalali_date.year:04d}-"
+            f"{jalali_date.month:02d}-"
+            f"{jalali_date.day:02d}"
+        )
+
+        # تشخیص نوع تقویم فقط برای اطلاعات خروجی
+        normalized = (
+            original
+            .replace("/", "-")
+            .replace(".", "-")
+            .replace("\\", "-")
+        )
+
+        input_year = int(normalized.split("-")[0])
+
+        calendar = (
+            "gregorian"
+            if 1700 <= input_year <= 3000
+            else "jalali"
+        )
+
+        return {
+            "input": original,
+            "calendar": calendar,
+            "gregorian": gregorian,
+            "jalali": jalali
+        }
+
+    except (ValueError, TypeError):
+        return None
 
 def category_keyboard():
     categories = get_categories()
@@ -284,6 +457,149 @@ async def go_back(update, context):
     context.user_data.clear()
     await update.message.reply_text("🏠 برگشتیم به منوی اصلی.", reply_markup=main_keyboard())
 
+async def quick_expenses_menu(update, context):
+    """منوی هزینه‌های سریع"""
+    user_id = update.effective_user.id
+
+    if not is_allowed(user_id):
+        return
+
+    # دریافت از دیتابیس
+    quick_items = get_quick_expenses(user_id)
+
+    if not quick_items:
+        # اگر هیچ هزینه سریعی وجود نداشت، پیام نمایش بده
+        await update.message.reply_text(
+            "🧾 **هزینه‌های سریع**\n\n"
+            "هیچ هزینه سریعی ثبت نشده.\n\n"
+            "برای افزودن، به بخش مدیریت هزینه‌های سریع برو.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⚙️ مدیریت هزینه‌های سریع", callback_data="quick_manage")],
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")]
+            ])
+        )
+        return
+
+    # ساخت دکمه‌ها از دیتابیس
+    keyboard = []
+    row = []
+    for item in quick_items:
+        row.append(InlineKeyboardButton(
+            f"{item['name']} ({item['amount']:,})",
+            callback_data=f"quick_{item['id']}"
+        ))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+
+    keyboard.append([InlineKeyboardButton("⚙️ مدیریت هزینه‌های سریع", callback_data="quick_manage")])
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")])
+
+    await update.message.reply_text(
+        "🧾 **هزینه‌های سریع**\n\n"
+        "یکی از گزینه‌های زیر رو انتخاب کن تا هزینه ثبت بشه:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def quick_menu_callback(update, context):
+    """بازگشت به منوی هزینه‌های سریع"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    quick_items = [
+        ["🍔 ناهار", "🚕 تاکسی", "☕ کافه"],
+        ["🛒 خرید", "💳 قبض", "🏠 اجاره"],
+    ]
+
+    keyboard = []
+    for row in quick_items:
+        keyboard.append([InlineKeyboardButton(item, callback_data=f"quick_{item}") for item in row])
+
+    keyboard.append([InlineKeyboardButton("⚙️ مدیریت هزینه‌های سریع", callback_data="quick_manage")])
+    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")])
+
+    await query.edit_message_text(
+        "🧾 **هزینه‌های سریع**\n\n"
+        "یکی از گزینه‌های زیر رو انتخاب کن تا هزینه با مبلغ پیش‌فرض ثبت بشه:\n\n"
+        "🍔 ناهار: ۸۵,۰۰۰ تومان\n"
+        "🚕 تاکسی: ۵۰,۰۰۰ تومان\n"
+        "☕ کافه: ۳۵,۰۰۰ تومان\n"
+        "🛒 خرید: ۲۰۰,۰۰۰ تومان\n"
+        "💳 قبض: ۱۵۰,۰۰۰ تومان\n"
+        "🏠 اجاره: ۵۰۰,۰۰۰ تومان\n\n"
+        "یا می‌تونی با فرمت `مبلغ توضیح` ثبت کنی:\n"
+        "مثال: `85000 ناهار`",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def quick_manage_callback(update, context):
+    """منوی مدیریت هزینه‌های سریع"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    buttons = [
+        [InlineKeyboardButton("➕ افزودن هزینه سریع", callback_data="quick_add")],
+        [InlineKeyboardButton("✏️ ویرایش هزینه سریع", callback_data="quick_edit")],
+        [InlineKeyboardButton("🗑️ حذف هزینه سریع", callback_data="quick_delete")],
+        [InlineKeyboardButton("🔙 بازگشت به هزینه‌های سریع", callback_data="quick_menu")],
+    ]
+
+    await query.edit_message_text(
+        "⚙️ **مدیریت هزینه‌های سریع**\n\n"
+        "می‌توانی هزینه‌های سریع رو مدیریت کنی:\n"
+        "➕ افزودن هزینه جدید\n"
+        "✏️ ویرایش مبلغ یا نام\n"
+        "🗑️ حذف هزینه‌های غیرضروری\n\n"
+        "یکی از گزینه‌های زیر رو انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+async def quick_callback(update, context):
+    """ثبت هزینه‌های سریع"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    # دریافت id هزینه سریع
+    quick_id = int(query.data.replace("quick_", ""))
+
+    # دریافت از دیتابیس
+    response = supabase.table("quick_expenses").select("*").eq("id", quick_id).eq("user_id", user_id).execute()
+    if not response.data:
+        await query.edit_message_text("❌ هزینه سریع پیدا نشد.")
+        return
+
+    item = response.data[0]
+    name = item["name"]
+    amount = item["amount"]
+    category = item["category"]
+
+    # ثبت هزینه اصلی
+    add_expense(user_id, amount, name, category)
+
+    await query.edit_message_text(
+        f"✅ هزینه ثبت شد!\n\n"
+        f"{category}\n"
+        f"💰 {amount:,} تومان\n"
+        f"📝 {name}",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_menu")]
+        ])
+    )
+
 async def expense_button(update, context):
     context.user_data.clear()
     context.user_data["waiting_for_expense"] = True
@@ -299,22 +615,135 @@ async def choose_category(update, context, category):
     )
 
 async def report(update, context):
+    """گزارش امروز با صفحه‌بندی"""
     user_id = update.effective_user.id
     if not is_allowed(user_id):
         return
-    today = datetime.now().strftime("%Y-%m-%d")
+    
+    today = datetime.now(TEHRAN_TZ).strftime("%Y-%m-%d")
+    today_jalali = to_jalali(today)
+    
+    # دریافت صفحه از context
+    page = context.user_data.get("report_page", 0)
+    limit = 5  # تعداد آیتم در هر صفحه
+    
+    # دریافت همه هزینه‌های امروز
     rows = get_day_expenses(user_id, today)
+    
     if not rows:
         await update.message.reply_text("📊 امروز هنوز هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
         return
+    
+    # محاسبه صفحه‌بندی
+    total_items = len(rows)
+    total_pages = (total_items + limit - 1) // limit
+    offset = page * limit
+    page_rows = rows[offset:offset + limit]
+    
+    if not page_rows and page > 0:
+        page = total_pages - 1
+        context.user_data["report_page"] = page
+        offset = page * limit
+        page_rows = rows[offset:offset + limit]
+    
     total = sum(row[1] for row in rows)
-    text = f"📊 گزارش امروز\n📅 {today}\n\n"
-    for expense_id, amount, description, category, created_at in rows:
+    
+    # ساخت متن گزارش
+    text = f"📊 گزارش امروز\n📅 {today_jalali}\n"
+    text += f"📄 صفحه {page + 1} از {total_pages}\n"
+    text += f"💰 مجموع کل: {total:,} تومان\n"
+    text += f"━━━━━━━━━━━━\n\n"
+    
+    # ✅ اینجا باید page_rows رو استفاده کنید، نه rows رو
+    for expense_id, amount, description, category, created_at in page_rows:
         time = created_at[11:16] if len(created_at) > 11 else ""
         text += f"#{expense_id} {category}\n💰 {amount:,} تومان\n📝 {description} | 🕐 {time}\n\n"
-    text += "━━━━━━━━━━━━\n"
-    text += f"🧾 تعداد: {len(rows)}\n💵 جمع امروز: {total:,} تومان"
-    await update.message.reply_text(text, reply_markup=main_keyboard())
+    
+    # ساخت دکمه‌های صفحه‌بندی
+    buttons = []
+    nav_buttons = []
+    
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"report_page:{page-1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(f"📄 {page + 1}/{total_pages}", callback_data="ignore"))
+    
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("➡️ بعدی", callback_data=f"report_page:{page+1}"))
+    
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    buttons.append([InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_menu")])
+    
+    await update.message.reply_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+async def report_page_callback(update, context):
+    """تغییر صفحه در گزارش امروز"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+    
+    # دریافت صفحه جدید
+    page = int(query.data.split(":")[1])
+    context.user_data["report_page"] = page
+    
+    today = datetime.now(TEHRAN_TZ).strftime("%Y-%m-%d")
+    today_jalali = to_jalali(today)
+    
+    # دریافت همه هزینه‌های امروز
+    rows = get_day_expenses(user_id, today)
+    
+    if not rows:
+        await query.edit_message_text("📊 امروز هنوز هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
+        return
+    
+    # محاسبه صفحه‌بندی
+    limit = 5
+    total_items = len(rows)
+    total_pages = (total_items + limit - 1) // limit
+    offset = page * limit
+    page_rows = rows[offset:offset + limit]
+    
+    total = sum(row[1] for row in rows)
+    
+    # ساخت متن گزارش
+    text = f"📊 گزارش امروز\n📅 {today_jalali}\n"
+    text += f"📄 صفحه {page + 1} از {total_pages}\n"
+    text += f"💰 مجموع کل: {total:,} تومان\n"
+    text += f"━━━━━━━━━━━━\n\n"
+    
+    for expense_id, amount, description, category, created_at in page_rows:
+        time = created_at[11:16] if len(created_at) > 11 else ""
+        text += f"#{expense_id} {category}\n💰 {amount:,} تومان\n📝 {description} | 🕐 {time}\n\n"
+    
+    # ساخت دکمه‌های صفحه‌بندی
+    buttons = []
+    nav_buttons = []
+    
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"report_page:{page-1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(f"📄 {page + 1}/{total_pages}", callback_data="ignore"))
+    
+    if page < total_pages - 1:
+        nav_buttons.append(InlineKeyboardButton("➡️ بعدی", callback_data=f"report_page:{page+1}"))
+    
+    if nav_buttons:
+        buttons.append(nav_buttons)
+    
+    buttons.append([InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_menu")])
+    
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 async def monthly_report(update, context):
     user_id = update.effective_user.id
@@ -354,74 +783,509 @@ async def recent(update, context):
         text += f"#{expense_id} {category}\n💰 {amount:,} تومان\n📝 {description}\n📅 {created_at[:10]} | 🕐 {created_at[11:16]}\n\n"
     await update.message.reply_text(text, reply_markup=main_keyboard())
 
-async def date_report_button(update, context):
-    context.user_data.clear()
-    context.user_data["waiting_report_date"] = True
-    await update.message.reply_text(
-        "📅 گزارش تاریخ دلخواه\n\nتاریخ را با فرمت زیر بفرست:\n\n2026-08-13\n\nمثال:\n2026-08-01",
-        reply_markup=back_keyboard()
-    )
-
-async def show_date_report(update, context, date_text):
-    user_id = update.effective_user.id
-    rows = get_day_expenses(user_id, date_text)
-    if not rows:
-        await update.message.reply_text(f"📅 برای {date_text} هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
-        context.user_data.clear()
-        return
-    total = sum(row[1] for row in rows)
-    text = f"📅 گزارش {date_text}\n\n"
-    for expense_id, amount, description, category, created_at in rows:
-        text += f"#{expense_id} {category}\n💰 {amount:,} تومان\n📝 {description}\n🕐 {created_at[11:16]}\n\n"
-    text += "━━━━━━━━━━━━\n"
-    text += f"🧾 تعداد: {len(rows)}\n💵 مجموع: {total:,} تومان"
-    context.user_data.clear()
-    await update.message.reply_text(text, reply_markup=main_keyboard())
-
-async def advanced_report_button(update, context):
-    context.user_data.clear()
-    context.user_data["waiting_advanced_start"] = True
-    await update.message.reply_text(
-        "📈 گزارش پیشرفته\n\nتاریخ شروع را وارد کن:\n\nمثال:\n2026-08-01",
-        reply_markup=back_keyboard()
-    )
-
-async def show_advanced_report(update, context, start_date, end_date):
-    user_id = update.effective_user.id
-    (total, count, average, maximum), daily_rows, category_rows = get_advanced_stats(user_id, start_date, end_date)
-    if count == 0:
-        await update.message.reply_text("📊 در این بازه هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
-        context.user_data.clear()
-        return
-    text = f"📈 گزارش پیشرفته\n\n📅 از {start_date}\n📅 تا {end_date}\n\n━━━━━━━━━━━━\n"
-    text += f"💵 مجموع: {total:,} تومان\n🧾 تعداد: {count}\n📊 میانگین هر هزینه: {average:,}\n🔝 بیشترین هزینه: {maximum:,}\n\n"
-    text += "━━━━━━━━━━━━\n📊 بر اساس دسته‌بندی\n\n"
-    for category, amount, cnt in category_rows:
-        text += f"{category}\n💰 {amount:,} تومان ({cnt} مورد)\n\n"
-    if daily_rows:
-        text += "━━━━━━━━━━━━\n📅 روند روزانه\n\n"
-        for date_text, amount, _ in daily_rows:
-            text += f"{date_text}: {amount:,} تومان\n"
-    context.user_data.clear()
-    await update.message.reply_text(text, reply_markup=main_keyboard())
-
-async def edit_delete_menu(update, context):
+async def stats(update, context):
+    """نمایش آمار کلی هزینه‌ها"""
     user_id = update.effective_user.id
     if not is_allowed(user_id):
         return
-    rows = get_recent_expenses(user_id)
+    
+    # دریافت همه هزینه‌ها
+    response = supabase.table("expenses").select("*").eq("user_id", user_id).execute()
+    rows = response.data
+    
     if not rows:
+        await update.message.reply_text("📊 هنوز هیچ هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
+        return
+    
+    # محاسبه آمار
+    total = sum(row["amount"] for row in rows)
+    count = len(rows)
+    average = total // count if count > 0 else 0
+    maximum = max(row["amount"] for row in rows) if rows else 0
+    minimum = min(row["amount"] for row in rows) if rows else 0
+    
+    # هزینه‌های امروز
+    today = datetime.now(TEHRAN_TZ).strftime("%Y-%m-%d")
+    today_rows = [row for row in rows if row["created_at"].startswith(today)]
+    today_count = len(today_rows)
+    today_total = sum(row["amount"] for row in today_rows)
+    
+    # هزینه‌های این ماه
+    month = datetime.now(TEHRAN_TZ).strftime("%Y-%m")
+    month_rows = [row for row in rows if row["created_at"].startswith(month)]
+    month_count = len(month_rows)
+    month_total = sum(row["amount"] for row in month_rows)
+    
+    # تبدیل تاریخ امروز به شمسی
+    today_jalali = to_jalali(today)
+    
+    text = "📊 **آمار کلی هزینه‌ها**\n\n"
+    text += f"💰 **مجموع کل:** {total:,} تومان\n"
+    text += f"🧾 **تعداد کل:** {count} هزینه\n"
+    text += f"📊 **میانگین هر هزینه:** {average:,} تومان\n"
+    text += f"🔺 **بیشترین هزینه:** {maximum:,} تومان\n"
+    text += f"🔻 **کمترین هزینه:** {minimum:,} تومان\n\n"
+    text += "━━━━━━━━━━━━\n"
+    text += f"📅 **امروز ({today_jalali})**\n"
+    text += f"🧾 {today_count} هزینه - 💰 {today_total:,} تومان\n\n"
+    text += f"📅 **این ماه**\n"
+    text += f"🧾 {month_count} هزینه - 💰 {month_total:,} تومان"
+    
+    await update.message.reply_text(text, reply_markup=main_keyboard())
+
+async def show_date_report(update, context, date_text):
+    """گزارش تاریخ دلخواه"""
+
+    user_id = update.effective_user.id
+
+    # تاریخ باید از قبل توسط parse_date_input تبدیل شده باشد
+    gregorian_date = parse_date_input(date_text)
+
+    if not gregorian_date:
+        await update.message.reply_text(
+            "❌ تاریخ نامعتبر است.",
+            reply_markup=main_keyboard()
+        )
+        context.user_data.clear()
+        return
+
+    rows = get_day_expenses(user_id, gregorian_date)
+
+    if not rows:
+        date_jalali = to_jalali(gregorian_date)
+
+        await update.message.reply_text(
+            f"📅 برای {date_jalali} هزینه‌ای ثبت نشده.",
+            reply_markup=main_keyboard()
+        )
+
+        context.user_data.clear()
+        return
+
+    page = context.user_data.get("date_report_page", 0)
+    limit = 5
+
+    total_items = len(rows)
+    total_pages = (total_items + limit - 1) // limit
+
+    offset = page * limit
+    page_rows = rows[offset:offset + limit]
+
+    if not page_rows and page > 0:
+        page = total_pages - 1
+        context.user_data["date_report_page"] = page
+
+        offset = page * limit
+        page_rows = rows[offset:offset + limit]
+
+    total = sum(row[1] for row in rows)
+
+    date_jalali = to_jalali(gregorian_date)
+
+    text = f"📅 گزارش {date_jalali}\n"
+    text += f"📄 صفحه {page + 1} از {total_pages}\n"
+    text += f"💰 مجموع کل: {total:,} تومان\n"
+    text += "━━━━━━━━━━━━\n\n"
+
+    for expense_id, amount, description, category, created_at in page_rows:
+        time = created_at[11:16] if len(created_at) > 11 else ""
+
+        text += (
+            f"#{expense_id} {category}\n"
+            f"💰 {amount:,} تومان\n"
+            f"📝 {description}\n"
+            f"🕐 {time}\n\n"
+        )
+
+    text += "━━━━━━━━━━━━\n"
+    text += f"🧾 تعداد: {len(rows)}\n"
+    text += f"💵 مجموع: {total:,} تومان"
+
+    buttons = []
+    nav_buttons = []
+
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton(
+                "⬅️ قبلی",
+                callback_data=f"date_page:{gregorian_date}:{page-1}"
+            )
+        )
+
+    nav_buttons.append(
+        InlineKeyboardButton(
+            f"📄 {page + 1}/{total_pages}",
+            callback_data="ignore"
+        )
+    )
+
+    if page < total_pages - 1:
+        nav_buttons.append(
+            InlineKeyboardButton(
+                "➡️ بعدی",
+                callback_data=f"date_page:{gregorian_date}:{page+1}"
+            )
+        )
+
+    buttons.append(nav_buttons)
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 بازگشت به منو",
+            callback_data="back_menu"
+        )
+    ])
+
+    context.user_data["date_report_date"] = gregorian_date
+    context.user_data["date_report_page"] = page
+
+    await update.message.reply_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+async def date_page_callback(update, context):
+    """تغییر صفحه در گزارش تاریخ"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    # دریافت تاریخ و صفحه جدید
+    parts = query.data.split(":")
+    date_text = parts[1]
+    page = int(parts[2])
+
+    # اطمینان از اینکه تاریخ همیشه میلادی استاندارد است
+    gregorian_date = parse_date_input(date_text)
+
+    if not gregorian_date:
+        await query.edit_message_text(
+            "❌ تاریخ گزارش نامعتبر است.",
+            reply_markup=main_keyboard()
+        )
+        return
+
+    context.user_data["date_report_page"] = page
+    context.user_data["date_report_date"] = gregorian_date
+
+    # دریافت همه هزینه‌های اون روز
+    rows = get_day_expenses(user_id, gregorian_date)
+
+    if not rows:
+        await query.edit_message_text(
+            f"📅 برای {date_text} هزینه‌ای ثبت نشده.",
+            reply_markup=main_keyboard()
+        )
+        return
+
+    # محاسبه صفحه‌بندی
+    limit = 5
+    total_items = len(rows)
+    total_pages = (total_items + limit - 1) // limit
+    offset = page * limit
+    page_rows = rows[offset:offset + limit]
+
+    total = sum(row[1] for row in rows)
+    date_jalali = to_jalali(gregorian_date)
+
+    # ساخت متن گزارش
+    text = f"📅 گزارش {date_jalali}\n"
+    text += f"📄 صفحه {page + 1} از {total_pages}\n"
+    text += f"💰 مجموع کل: {total:,} تومان\n"
+    text += f"━━━━━━━━━━━━\n\n"
+
+    for expense_id, amount, description, category, created_at in page_rows:
+        time = created_at[11:16] if len(created_at) > 11 else ""
+        text += f"#{expense_id} {category}\n💰 {amount:,} تومان\n📝 {description}\n🕐 {time}\n\n"
+
+    text += "━━━━━━━━━━━━\n"
+    text += f"🧾 تعداد: {len(rows)}\n"
+    text += f"💵 مجموع: {total:,} تومان"
+
+    # ساخت دکمه‌های صفحه‌بندی
+    buttons = []
+    nav_buttons = []
+
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton(
+                "⬅️ قبلی",
+                callback_data=f"date_page:{gregorian_date}:{page-1}"
+            )
+        )
+
+    nav_buttons.append(
+        InlineKeyboardButton(
+            f"📄 {page + 1}/{total_pages}",
+            callback_data="ignore"
+        )
+    )
+
+    if page < total_pages - 1:
+        nav_buttons.append(
+            InlineKeyboardButton(
+                "➡️ بعدی",
+                callback_data=f"date_page:{gregorian_date}:{page+1}"
+            )
+        )
+
+    buttons.append(nav_buttons)
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 بازگشت به منو",
+            callback_data="back_menu"
+        )
+    ])
+
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+async def advanced_report_button(update, context):
+    """شروع گزارش پیشرفته با دکمه‌های میانبر"""
+    context.user_data.clear()
+    context.user_data["waiting_advanced_start"] = True
+    
+    # دکمه‌های میانبر برای تاریخ
+    keyboard = [
+        [
+            InlineKeyboardButton("📅 امروز", callback_data="adv_today"),
+            InlineKeyboardButton("📅 این هفته", callback_data="adv_this_week"),
+        ],
+        [
+            InlineKeyboardButton("📅 هفته گذشته", callback_data="adv_week"),
+            InlineKeyboardButton("📅 ماه جاری", callback_data="adv_month"),
+        ],
+        [
+            InlineKeyboardButton("📅 سه ماه اخیر", callback_data="adv_quarter"),
+            InlineKeyboardButton("✏️ وارد کردن دستی", callback_data="adv_manual"),
+        ],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")],
+    ]
+    
+    await update.message.reply_text(
+        "📈 گزارش پیشرفته\n\n"
+        "یک بازه زمانی را انتخاب کن:\n"
+        "یا دکمه «وارد کردن دستی» را بزن تا تاریخ را خودت وارد کنی.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def advanced_quick_callback(update, context):
+    """دکمه‌های میانبر برای گزارش پیشرفته"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    today = datetime.now().date()
+    action = query.data
+
+    if action == "adv_today":
+        start_date = today.strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
+
+    elif action == "adv_this_week":
+        # شروع هفته از دوشنبه
+        start_of_week = today - timedelta(days=today.weekday())
+        start_date = start_of_week.strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
+
+    elif action == "adv_week":
+        start_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
+
+    elif action == "adv_month":
+        # اولین روز ماه شمسی
+        today_jalali = jdatetime.date.fromgregorian(date=today)
+
+        first_day_jalali = jdatetime.date(
+            today_jalali.year,
+            today_jalali.month,
+            1
+        )
+
+        start_date = (
+            first_day_jalali
+            .togregorian()
+            .strftime("%Y-%m-%d")
+        )
+
+        end_date = today.strftime("%Y-%m-%d")
+
+    elif action == "adv_quarter":
+        start_date = (today - timedelta(days=90)).strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
+
+    elif action == "adv_manual":
+        await query.edit_message_text(
+            "📅 تاریخ شروع را وارد کن:\n\n"
+            "مثال:\n"
+            "2026-08-01"
+        )
+
+        context.user_data["waiting_advanced_start"] = True
+        return
+
+    else:
+        await query.edit_message_text("❌ گزینه نامعتبر.")
+        return
+
+    context.user_data.clear()
+
+    await show_advanced_report(
+        update,
+        context,
+        start_date,
+        end_date,
+        from_callback=True
+    )
+
+async def show_advanced_report(update, context, start_date, end_date, from_callback=False):
+    """نمایش گزارش پیشرفته با تاریخ شمسی"""
+    user_id = update.effective_user.id
+    
+    # تبدیل تاریخ‌ها به شمسی برای نمایش
+    start_jalali = to_jalali(start_date)
+    end_jalali = to_jalali(end_date)
+    
+    (total, count, average, maximum), daily_rows, category_rows = get_advanced_stats(user_id, start_date, end_date)
+    
+    if count == 0:
+        if from_callback and update.callback_query:
+            await update.callback_query.edit_message_text("📊 در این بازه هزینه‌ای ثبت نشده.")
+        else:
+            await update.message.reply_text("📊 در این بازه هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
+        context.user_data.clear()
+        return
+    
+    # مرتب‌سازی دسته‌بندی‌ها بر اساس مبلغ (بیشترین اول)
+    category_rows_sorted = sorted(category_rows, key=lambda x: x[1], reverse=True)
+    
+    text = f"📈 گزارش پیشرفته\n\n"
+    text += f"📅 از {start_jalali}\n"
+    text += f"📅 تا {end_jalali}\n\n"
+    text += "━━━━━━━━━━━━\n"
+    text += f"💵 مجموع: {total:,} تومان\n"
+    text += f"🧾 تعداد: {count}\n"
+    text += f"📊 میانگین هر هزینه: {average:,}\n"
+    text += f"🔝 بیشترین هزینه: {maximum:,}\n\n"
+    
+    text += "━━━━━━━━━━━━\n"
+    text += "📊 بر اساس دسته‌بندی\n\n"
+    
+    for category, amount, cnt in category_rows_sorted:
+        text += f"{category}\n💰 {amount:,} تومان ({cnt} مورد)\n\n"
+    
+    if daily_rows:
+        text += "━━━━━━━━━━━━\n"
+        text += "📅 روند روزانه\n\n"
+        # مرتب‌سازی روزها (جدیدترین اول)
+        daily_rows_sorted = sorted(daily_rows, key=lambda x: x[0], reverse=True)
+        for date_text, amount, _ in daily_rows_sorted:
+            date_jalali = to_jalali(date_text)
+            text += f"{date_jalali}: {amount:,} تومان\n"
+    
+    context.user_data.clear()
+    
+    # دکمه بازگشت
+    buttons = [[InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_menu")]]
+    
+    if from_callback and update.callback_query:
+        await update.callback_query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+    else:
+        await update.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+async def edit_delete_menu(update, context):
+    """نمایش هزینه‌ها با صفحه‌بندی برای حذف/ویرایش"""
+    user_id = update.effective_user.id
+    if not is_allowed(user_id):
+        return
+    
+    # دریافت صفحه از context (پیش‌فرض ۰)
+    page = context.user_data.get("edit_page", 0)
+    limit = 5  # تعداد آیتم در هر صفحه
+    
+    # دریافت هزینه‌ها با صفحه‌بندی
+    offset = page * limit
+    response = (
+        supabase.table("expenses")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    
+    rows = [(row["id"], row["amount"], row["description"], row["category"], row["created_at"]) for row in response.data]
+    
+    # بررسی وجود صفحه بعدی
+    next_check = (
+        supabase.table("expenses")
+        .select("id")
+        .eq("user_id", user_id)
+        .range(offset + limit, offset + limit)
+        .execute()
+    )
+    has_next = len(next_check.data) > 0
+    
+    if not rows and page == 0:
         await update.message.reply_text("📋 هنوز هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
         return
+    
+    if not rows:
+        await update.message.reply_text("📋 صفحه خالی است.", reply_markup=main_keyboard())
+        return
+    
+    # ساخت دکمه‌ها
     buttons = []
     for expense_id, amount, description, category, created_at in rows:
+        date_part = created_at[:10] if len(created_at) >= 10 else ""
         buttons.append([
-            InlineKeyboardButton(f"✏️ ویرایش #{expense_id}", callback_data=f"edit:{expense_id}"),
-            InlineKeyboardButton(f"🗑️ حذف #{expense_id}", callback_data=f"delete:{expense_id}"),
+            InlineKeyboardButton(
+                f"✏️ #{expense_id} | {amount:,} تومان",
+                callback_data=f"edit:{expense_id}"
+            ),
+            InlineKeyboardButton(
+                f"🗑️ حذف",
+                callback_data=f"delete:{expense_id}"
+            ),
         ])
-    buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")])
+    
+    # دکمه‌های صفحه‌بندی
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"edit_page:{page-1}"))
+    
+    # شماره صفحه
+    nav_buttons.append(InlineKeyboardButton(f"📄 {page + 1}", callback_data="ignore"))
+    
+    if has_next:
+        nav_buttons.append(InlineKeyboardButton("➡️ بعدی", callback_data=f"edit_page:{page+1}"))
+    
+    buttons.append(nav_buttons)
+    buttons.append([InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_menu")])
+    
+    # ذخیره صفحه فعلی در context
+    context.user_data["edit_page"] = page
+    
     await update.message.reply_text(
-        "🗑️ حذف / ✏️ ویرایش\n\nهزینه موردنظر را انتخاب کن:",
+        f"🗑️ حذف / ✏️ ویرایش\n"
+        f"📄 صفحه {page + 1}\n"
+        f"📋 {len(rows)} هزینه در این صفحه\n\n"
+        "هزینه موردنظر را انتخاب کن:",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
@@ -467,25 +1331,115 @@ async def cancel_delete_callback(update, context):
     await query.edit_message_text("❌ حذف لغو شد.")
 
 async def edit_callback(update, context):
+    """ویرایش هزینه انتخاب شده"""
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     if not is_allowed(user_id):
         return
+    
     expense_id = int(query.data.split(":")[1])
     expense = get_expense(user_id, expense_id)
     if not expense:
         await query.edit_message_text("❌ هزینه پیدا نشد.")
         return
+    
     _, amount, description, category, _ = expense
     context.user_data.clear()
     context.user_data["editing_expense"] = expense_id
     context.user_data["editing_category"] = category
     context.user_data["waiting_for_edit"] = True
+    
     await query.edit_message_text(
-        f"✏️ ویرایش هزینه #{expense_id}\n\n{category}\n💰 مبلغ فعلی: {amount:,}\n📝 {description}\n\nمبلغ و توضیح جدید را بفرست.\n\nمثال:\n95000 ناهار رستوران"
+        f"✏️ ویرایش هزینه #{expense_id}\n\n"
+        f"{category}\n"
+        f"💰 مبلغ فعلی: {amount:,} تومان\n"
+        f"📝 {description}\n\n"
+        "مبلغ و توضیح جدید را بفرست.\n\n"
+        "مثال:\n95000 ناهار رستوران"
     )
-    await context.bot.send_message(chat_id=user_id, text="🔙 بازگشت", reply_markup=back_keyboard())
+    await context.bot.send_message(
+        chat_id=user_id,
+        text="🔙 بازگشت",
+        reply_markup=back_keyboard()
+    )
+
+async def edit_page_callback(update, context):
+    """تغییر صفحه در منوی حذف/ویرایش"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+    
+    # دریافت صفحه جدید
+    page = int(query.data.split(":")[1])
+    context.user_data["edit_page"] = page
+    
+    # شبیه‌سازی منوی حذف/ویرایش
+    limit = 5
+    offset = page * limit
+    
+    response = (
+        supabase.table("expenses")
+        .select("*")
+        .eq("user_id", user_id)
+        .order("created_at", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    
+    rows = [(row["id"], row["amount"], row["description"], row["category"], row["created_at"]) for row in response.data]
+    
+    # بررسی وجود صفحه بعدی
+    next_check = (
+        supabase.table("expenses")
+        .select("id")
+        .eq("user_id", user_id)
+        .range(offset + limit, offset + limit)
+        .execute()
+    )
+    has_next = len(next_check.data) > 0
+    
+    if not rows:
+        await query.edit_message_text("📋 صفحه خالی است.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")]]))
+        return
+    
+    # ساخت دکمه‌ها
+    buttons = []
+    for expense_id, amount, description, category, created_at in rows:
+        buttons.append([
+            InlineKeyboardButton(
+                f"✏️ #{expense_id} | {amount:,} تومان",
+                callback_data=f"edit:{expense_id}"
+            ),
+            InlineKeyboardButton(
+                f"🗑️ حذف",
+                callback_data=f"delete:{expense_id}"
+            ),
+        ])
+    
+    # دکمه‌های صفحه‌بندی
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"edit_page:{page-1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(f"📄 {page + 1}", callback_data="ignore"))
+    
+    if has_next:
+        nav_buttons.append(InlineKeyboardButton("➡️ بعدی", callback_data=f"edit_page:{page+1}"))
+    
+    buttons.append(nav_buttons)
+    buttons.append([InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_menu")])
+    
+    await query.edit_message_text(
+        f"🗑️ حذف / ✏️ ویرایش\n"
+        f"📄 صفحه {page + 1}\n"
+        f"📋 {len(rows)} هزینه در این صفحه\n\n"
+        "هزینه موردنظر را انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 async def settings(update, context):
     buttons = [
@@ -511,6 +1465,11 @@ async def manage_categories(update, context):
         [InlineKeyboardButton("🔙 بازگشت", callback_data="settings_menu")],
     ]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+
+async def ignore_callback(update, context):
+    """دکمه‌های غیرفعال (شماره صفحه)"""
+    query = update.callback_query
+    await query.answer("📄 این دکمه فقط نمایشی است")
 
 async def category_add_callback(update, context):
     query = update.callback_query
@@ -592,9 +1551,18 @@ async def confirm_category_delete_callback(update, context):
 async def back_callback(update, context):
     query = update.callback_query
     await query.answer()
+
     context.user_data.clear()
-    await query.edit_message_text("🏠 برگشتیم به منوی اصلی.")
-    await context.bot.send_message(chat_id=query.from_user.id, text="منوی اصلی:", reply_markup=main_keyboard())
+
+    await query.edit_message_text(
+        "🏠 منوی اصلی"
+    )
+
+    await context.bot.send_message(
+        chat_id=query.from_user.id,
+        text="از منوی پایین انتخاب کن 👇",
+        reply_markup=main_keyboard()
+    )
 
 async def settings_menu_callback(update, context):
     query = update.callback_query
@@ -607,6 +1575,224 @@ async def settings_menu_callback(update, context):
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")],
     ]
     await query.edit_message_text("⚙️ تنظیمات", reply_markup=InlineKeyboardMarkup(buttons))
+
+# ==========================================
+# توابع مدیریت هزینه‌های سریع
+# ==========================================
+async def quick_add_callback(update, context):
+    """افزودن هزینه سریع جدید - روش خیلی ساده"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    # دریافت دسته‌بندی‌ها
+    categories = get_categories()
+    
+    # دکمه‌های دسته‌بندی
+    category_buttons = []
+    row = []
+    for cat_id, cat_name in categories:
+        row.append(InlineKeyboardButton(cat_name, callback_data=f"quick_add_cat_{cat_id}"))
+        if len(row) == 2:
+            category_buttons.append(row)
+            row = []
+    if row:
+        category_buttons.append(row)
+
+    category_buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")])
+
+    context.user_data["quick_add_step"] = "category"
+
+    await query.edit_message_text(
+        "➕ **افزودن هزینه سریع جدید**\n\n"
+        "۱. دسته‌بندی رو انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(category_buttons)
+    )
+
+async def quick_add_category_callback(update, context):
+    """انتخاب دسته‌بندی برای هزینه سریع"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    # دریافت دسته‌بندی انتخاب شده
+    cat_id = int(query.data.replace("quick_add_cat_", ""))
+    categories = get_categories()
+    
+    category_name = None
+    for cid, name in categories:
+        if cid == cat_id:
+            category_name = name
+            break
+
+    if not category_name:
+        await query.edit_message_text("❌ دسته‌بندی پیدا نشد.")
+        return
+
+    context.user_data["quick_add_category"] = category_name
+    context.user_data["waiting_quick_add"] = True
+
+    await query.edit_message_text(
+        f"➕ **افزودن هزینه سریع**\n\n"
+        f"📂 دسته‌بندی: {category_name}\n\n"
+        "۲. مبلغ رو وارد کن (فقط عدد):\n\n"
+        "مثال: `85000`\n\n"
+        "یا با توضیح: `85000 ناهار`",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")]
+        ])
+    )
+async def quick_delete_confirm_callback(update, context):
+    """تأیید حذف هزینه سریع"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    # دریافت id هزینه سریع
+    quick_id = int(query.data.replace("quick_delete_confirm_", ""))
+
+    # حذف از دیتابیس
+    deleted = delete_quick_expense(user_id, quick_id)
+
+    if deleted:
+        await query.edit_message_text(
+            "✅ **هزینه سریع با موفقیت حذف شد!**",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="quick_manage")]
+            ])
+        )
+    else:
+        await query.edit_message_text(
+            "❌ خطا در حذف هزینه سریع.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")]
+            ])
+        )
+
+async def quick_edit_select_callback(update, context):
+    """انتخاب هزینه برای ویرایش"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    # دریافت id هزینه سریع
+    quick_id = int(query.data.replace("quick_edit_select_", ""))
+
+    # دریافت از دیتابیس
+    response = supabase.table("quick_expenses").select("*").eq("id", quick_id).eq("user_id", user_id).execute()
+    if not response.data:
+        await query.edit_message_text("❌ هزینه سریع پیدا نشد.")
+        return
+
+    item = response.data[0]
+    context.user_data["quick_edit_id"] = quick_id
+    context.user_data["quick_edit_name"] = item["name"]
+    context.user_data["waiting_quick_edit"] = True
+
+    await query.edit_message_text(
+        f"✏️ **ویرایش {item['name']}**\n\n"
+        "مبلغ جدید رو وارد کن:\n\n"
+        f"مبلغ فعلی: {item['amount']:,} تومان\n"
+        f"دسته‌بندی: {item['category']}\n\n"
+        "مثال: `75000`\n\n"
+        "برای تغییر نام و دسته‌بندی، از فرمت زیر استفاده کن:\n"
+        "`نام جدید|مبلغ جدید|دسته‌بندی جدید`\n\n"
+        "مثال:\n"
+        "`صبحانه|45000|🍔 غذا`",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")]
+        ])
+    )
+
+async def quick_edit_callback(update, context):
+    """ویرایش هزینه سریع"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    # دریافت هزینه‌های سریع از دیتابیس
+    quick_items = get_quick_expenses(user_id)
+
+    if not quick_items:
+        await query.edit_message_text(
+            "📋 **هیچ هزینه سریعی برای ویرایش وجود ندارد.**\n\n"
+            "ابتدا از طریق «➕ افزودن هزینه سریع» یک هزینه اضافه کن.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")]
+            ])
+        )
+        return
+
+    buttons = []
+    for item in quick_items:
+        buttons.append([
+            InlineKeyboardButton(
+                f"✏️ {item['name']} ({item['amount']:,})",
+                callback_data=f"quick_edit_select_{item['id']}"
+            )
+        ])
+
+    buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")])
+
+    await query.edit_message_text(
+        "✏️ **ویرایش هزینه سریع**\n\n"
+        "هزینه‌ای که میخوای ویرایش کنی رو انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+async def quick_delete_callback(update, context):
+    """حذف هزینه سریع"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    # دریافت هزینه‌های سریع از دیتابیس
+    quick_items = get_quick_expenses(user_id)
+
+    if not quick_items:
+        await query.edit_message_text(
+            "📋 **هیچ هزینه سریعی برای حذف وجود ندارد.**",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")]
+            ])
+        )
+        return
+
+    buttons = []
+    for item in quick_items:
+        buttons.append([
+            InlineKeyboardButton(
+                f"🗑️ {item['name']} ({item['amount']:,})",
+                callback_data=f"quick_delete_confirm_{item['id']}"
+            )
+        ])
+
+    buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")])
+
+    await query.edit_message_text(
+        "🗑️ **حذف هزینه سریع**\n\n"
+        "هزینه‌ای که میخوای حذف کنی رو انتخاب کن:\n\n"
+        "⚠️ فقط از لیست هزینه‌های سریع حذف میشه.",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 # ==========================================
 # تابع خروجی اکسل
@@ -1224,6 +2410,493 @@ async def export_excel(update, context):
 # ==========================================
 # هندلر اصلی پیام‌ها
 # ==========================================
+async def reports_menu(update, context):
+    """منوی گزارش‌ها"""
+    user_id = update.effective_user.id
+
+    if not is_allowed(user_id):
+        return
+
+    buttons = [
+        [
+            InlineKeyboardButton("📊 گزارش امروز", callback_data="report_today"),
+            InlineKeyboardButton("📅 گزارش تاریخ", callback_data="report_date"),
+        ],
+        [
+            InlineKeyboardButton("📊 گزارش ماه", callback_data="report_month"),
+            InlineKeyboardButton("📈 گزارش پیشرفته", callback_data="report_advanced"),
+        ],
+        [
+            InlineKeyboardButton("📋 هزینه‌های اخیر", callback_data="report_recent"),
+            InlineKeyboardButton("📊 آمار کلی", callback_data="report_stats"),
+        ],
+        [
+            InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")
+        ]
+    ]
+
+    await update.message.reply_text(
+        "📊 گزارش‌ها\n\n"
+        "نوع گزارش موردنظر را انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+async def reports_callback(update, context):
+    """مدیریت دکمه‌های منوی گزارش‌ها"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+
+    if not is_allowed(user_id):
+        return
+
+    action = query.data
+
+    # ==========================================
+    # گزارش امروز
+    # ==========================================
+    if action == "report_today":
+
+        context.user_data["report_page"] = 0
+
+        today = datetime.now(TEHRAN_TZ).strftime("%Y-%m-%d")
+
+        rows = get_day_expenses(user_id, today)
+
+        if not rows:
+            await query.edit_message_text(
+                "📊 امروز هنوز هزینه‌ای ثبت نشده."
+            )
+            return
+
+        limit = 5
+        page = 0
+
+        total_items = len(rows)
+        total_pages = (total_items + limit - 1) // limit
+
+        page_rows = rows[:limit]
+
+        total = sum(row[1] for row in rows)
+
+        today_jalali = to_jalali(today)
+
+        text = f"📊 گزارش امروز\n"
+        text += f"📅 {today_jalali}\n"
+        text += f"📄 صفحه {page + 1} از {total_pages}\n"
+        text += f"💰 مجموع کل: {total:,} تومان\n"
+        text += "━━━━━━━━━━━━\n\n"
+
+        for expense_id, amount, description, category, created_at in page_rows:
+
+            time = created_at[11:16] if len(created_at) >= 16 else ""
+
+            text += (
+                f"#{expense_id} {category}\n"
+                f"💰 {amount:,} تومان\n"
+                f"📝 {description}\n"
+                f"🕐 {time}\n\n"
+            )
+
+        buttons = []
+
+        nav_buttons = []
+
+        nav_buttons.append(
+            InlineKeyboardButton(
+                f"📄 {page + 1}/{total_pages}",
+                callback_data="ignore"
+            )
+        )
+
+        if total_pages > 1:
+            nav_buttons.append(
+                InlineKeyboardButton(
+                    "➡️ بعدی",
+                    callback_data="report_page:1"
+                )
+            )
+
+        buttons.append(nav_buttons)
+
+        buttons.append([
+            InlineKeyboardButton(
+                "🔙 بازگشت به گزارش‌ها",
+                callback_data="reports_menu"
+            )
+        ])
+
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+        return
+
+    # ==========================================
+    # گزارش تاریخ
+    # ==========================================
+    if action == "report_date":
+
+        context.user_data.clear()
+
+        context.user_data["waiting_report_date"] = True
+        context.user_data["date_report_page"] = 0
+
+        await query.edit_message_text(
+            "📅 گزارش تاریخ\n\n"
+            "تاریخ موردنظر را وارد کن:\n\n"
+            "📅 شمسی:\n"
+            "1405-05-23\n\n"
+            "📅 میلادی:\n"
+            "2026-08-14\n\n"
+            "فرمت‌های قابل قبول:\n"
+            "1405/05/23\n"
+            "1405.05.23"
+        )
+
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="🔙 برای بازگشت، دکمه زیر را بزن.",
+            reply_markup=back_keyboard()
+        )
+
+        return
+
+    # ==========================================
+    # گزارش ماه
+    # ==========================================
+    if action == "report_month":
+
+        context.user_data.clear()
+
+        today = datetime.now(TEHRAN_TZ)
+
+        month = today.strftime("%Y-%m")
+
+        rows = get_month_expenses(user_id, month)
+
+        if not rows:
+
+            await query.edit_message_text(
+                "📅 این ماه هنوز هزینه‌ای ثبت نشده."
+            )
+
+            return
+
+        categories = {}
+
+        for row in rows:
+
+            category = row["category"]
+
+            if category not in categories:
+                categories[category] = {
+                    "total": 0,
+                    "count": 0
+                }
+
+            categories[category]["total"] += row["amount"]
+            categories[category]["count"] += 1
+
+        total = sum(
+            data["total"]
+            for data in categories.values()
+        )
+
+        count = sum(
+            data["count"]
+            for data in categories.values()
+        )
+
+        jalali_month = to_jalali(
+            f"{month}-01"
+        )[:7]
+
+        text = (
+            f"📅 گزارش ماه جاری\n"
+            f"📆 {jalali_month}\n\n"
+        )
+
+        for category, data in categories.items():
+
+            text += (
+                f"{category}\n"
+                f"💰 {data['total']:,} تومان "
+                f"({data['count']} مورد)\n\n"
+            )
+
+        text += "━━━━━━━━━━━━\n"
+        text += f"🧾 تعداد هزینه‌ها: {count}\n"
+        text += f"💵 مجموع: {total:,} تومان"
+
+        buttons = [[
+            InlineKeyboardButton(
+                "🔙 بازگشت به گزارش‌ها",
+                callback_data="reports_menu"
+            )
+        ]]
+
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+        return
+
+    # ==========================================
+    # هزینه‌های اخیر
+    # ==========================================
+    if action == "report_recent":
+
+        context.user_data.clear()
+
+        rows = get_recent_expenses(
+            user_id,
+            limit=10
+        )
+
+        if not rows:
+
+            await query.edit_message_text(
+                "📋 هنوز هیچ هزینه‌ای ثبت نشده."
+            )
+
+            return
+
+        text = "📋 آخرین هزینه‌ها\n\n"
+
+        for expense_id, amount, description, category, created_at in rows:
+
+            date_part = to_jalali(created_at)
+
+            time = (
+                created_at[11:16]
+                if len(created_at) >= 16
+                else ""
+            )
+
+            text += (
+                f"#{expense_id} {category}\n"
+                f"💰 {amount:,} تومان\n"
+                f"📝 {description}\n"
+                f"📅 {date_part} | 🕐 {time}\n\n"
+            )
+
+        buttons = [[
+            InlineKeyboardButton(
+                "🔙 بازگشت به گزارش‌ها",
+                callback_data="reports_menu"
+            )
+        ]]
+
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+        return
+
+    # ==========================================
+    # آمار کلی
+    # ==========================================
+    if action == "report_stats":
+
+        context.user_data.clear()
+
+        response = (
+            supabase
+            .table("expenses")
+            .select("*")
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        rows = response.data or []
+
+        if not rows:
+
+            await query.edit_message_text(
+                "📊 هنوز هیچ هزینه‌ای ثبت نشده."
+            )
+
+            return
+
+        total = sum(
+            int(row["amount"])
+            for row in rows
+        )
+
+        count = len(rows)
+
+        average = (
+            total // count
+            if count
+            else 0
+        )
+
+        maximum = max(
+            int(row["amount"])
+            for row in rows
+        )
+
+        minimum = min(
+            int(row["amount"])
+            for row in rows
+        )
+
+        # امروز
+        today = datetime.now(
+            TEHRAN_TZ
+        ).strftime("%Y-%m-%d")
+
+        today_rows = [
+            row
+            for row in rows
+            if str(row["created_at"]).startswith(today)
+        ]
+
+        today_count = len(today_rows)
+
+        today_total = sum(
+            int(row["amount"])
+            for row in today_rows
+        )
+
+        # ماه جاری
+        month = today[:7]
+
+        month_rows = [
+            row
+            for row in rows
+            if str(row["created_at"]).startswith(month)
+        ]
+
+        month_count = len(month_rows)
+
+        month_total = sum(
+            int(row["amount"])
+            for row in month_rows
+        )
+
+        today_jalali = to_jalali(today)
+
+        text = "📊 آمار کلی هزینه‌ها\n\n"
+
+        text += f"💰 مجموع کل: {total:,} تومان\n"
+        text += f"🧾 تعداد کل: {count} هزینه\n"
+        text += f"📊 میانگین هر هزینه: {average:,} تومان\n"
+        text += f"🔺 بیشترین هزینه: {maximum:,} تومان\n"
+        text += f"🔻 کمترین هزینه: {minimum:,} تومان\n\n"
+
+        text += "━━━━━━━━━━━━\n"
+
+        text += (
+            f"📅 امروز ({today_jalali})\n"
+            f"🧾 {today_count} هزینه - "
+            f"💰 {today_total:,} تومان\n\n"
+        )
+
+        text += (
+            "📅 این ماه\n"
+            f"🧾 {month_count} هزینه - "
+            f"💰 {month_total:,} تومان"
+        )
+
+        buttons = [[
+            InlineKeyboardButton(
+                "🔙 بازگشت به گزارش‌ها",
+                callback_data="reports_menu"
+            )
+        ]]
+
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+        return
+
+    # ==========================================
+    # گزارش پیشرفته
+    # ==========================================
+    if action == "report_advanced":
+
+        context.user_data.clear()
+
+        context.user_data["waiting_advanced_start"] = True
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "📅 امروز",
+                    callback_data="adv_today"
+                ),
+                InlineKeyboardButton(
+                    "📅 این هفته",
+                    callback_data="adv_this_week"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📅 هفته گذشته",
+                    callback_data="adv_week"
+                ),
+                InlineKeyboardButton(
+                    "📅 ماه جاری",
+                    callback_data="adv_month"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📅 سه ماه اخیر",
+                    callback_data="adv_quarter"
+                ),
+                InlineKeyboardButton(
+                    "✏️ وارد کردن دستی",
+                    callback_data="adv_manual"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="reports_menu"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            "📈 گزارش پیشرفته\n\n"
+            "یک بازه زمانی را انتخاب کن:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+        return
+
+async def date_report_button(update, context):
+    """شروع گزارش برای یک تاریخ دلخواه"""
+    user_id = update.effective_user.id
+
+    if not is_allowed(user_id):
+        return
+
+    context.user_data.clear()
+    context.user_data["waiting_report_date"] = True
+    context.user_data["date_report_page"] = 0
+
+    await update.message.reply_text(
+        "📅 گزارش تاریخ\n\n"
+        "تاریخ موردنظر را وارد کن:\n\n"
+        "📅 شمسی:\n"
+        "1405-05-23\n\n"
+        "📅 میلادی:\n"
+        "2026-08-14\n\n"
+        "فرمت‌های قابل قبول:\n"
+        "1405/05/23\n"
+        "1405.05.23",
+        reply_markup=back_keyboard()
+    )
 
 async def handle_message(update, context):
     user_id = update.effective_user.id
@@ -1237,6 +2910,9 @@ async def handle_message(update, context):
         await go_back(update, context)
         return
     
+    # ==========================================
+    # مدیریت دسته‌بندی‌ها
+    # ==========================================
     if context.user_data.get("waiting_category_add"):
         if not message:
             return
@@ -1262,77 +2938,140 @@ async def handle_message(update, context):
             await update.message.reply_text("❌ تغییر نام انجام نشد.", reply_markup=back_keyboard())
         return
     
+    # ==========================================
+    # گزارش‌ها
+    # ==========================================
     if context.user_data.get("waiting_report_date"):
-        date_text = normalize_digits(message)
-        try:
-            datetime.strptime(date_text, "%Y-%m-%d")
-        except ValueError:
-            await update.message.reply_text("❌ تاریخ نامعتبر است.\n\nفرمت درست:\n2026-08-13", reply_markup=back_keyboard())
+        date_info = get_date_info(message)
+
+        if not date_info:
+            await update.message.reply_text(
+                "❌ تاریخ نامعتبر است.\n\n"
+                "فرمت‌های قابل قبول:\n\n"
+                "📅 شمسی:\n"
+                "1405-05-23\n\n"
+                "📅 میلادی:\n"
+                "2026-08-14\n\n"
+                "مثال:\n"
+                "1405/05/23",
+                reply_markup=back_keyboard()
+            )
             return
-        await show_date_report(update, context, date_text)
+
+        context.user_data["date_report_date"] = date_info["gregorian"]
+        context.user_data["date_report_page"] = 0
+
+        await show_date_report(
+            update,
+            context,
+            date_info["gregorian"]
+        )
+
         return
     
     if context.user_data.get("waiting_advanced_start"):
-        start_date = normalize_digits(message)
-        try:
-            datetime.strptime(start_date, "%Y-%m-%d")
-        except ValueError:
-            await update.message.reply_text("❌ تاریخ نامعتبر است.\n\nفرمت:\n2026-08-01", reply_markup=back_keyboard())
+        date_info = get_date_info(message)
+
+        if not date_info:
+            await update.message.reply_text(
+                "❌ تاریخ نامعتبر است.\n\n"
+                "مثال شمسی:\n"
+                "1405-05-01\n\n"
+                "مثال میلادی:\n"
+                "2026-08-01",
+                reply_markup=back_keyboard()
+            )
             return
+
+        start_date = date_info["gregorian"]
+
         context.user_data.clear()
         context.user_data["waiting_advanced_end"] = True
         context.user_data["advanced_start"] = start_date
-        await update.message.reply_text("📅 تاریخ پایان را وارد کن:\n\nمثال:\n2026-08-13", reply_markup=back_keyboard())
+
+        await update.message.reply_text(
+            "📅 تاریخ پایان را وارد کن:\n\n"
+            "شمسی:\n"
+            "1405-05-23\n\n"
+            "میلادی:\n"
+            "2026-08-14",
+            reply_markup=back_keyboard()
+        )
+
         return
     
     if context.user_data.get("waiting_advanced_end"):
-        end_date = normalize_digits(message)
-        try:
-            datetime.strptime(end_date, "%Y-%m-%d")
-        except ValueError:
-            await update.message.reply_text("❌ تاریخ نامعتبر است.\n\nفرمت:\n2026-08-13", reply_markup=back_keyboard())
+        date_info = get_date_info(message)
+
+        if not date_info:
+            await update.message.reply_text(
+                "❌ تاریخ نامعتبر است.\n\n"
+                "مثال شمسی:\n"
+                "1405-05-23\n\n"
+                "مثال میلادی:\n"
+                "2026-08-14",
+                reply_markup=back_keyboard()
+            )
             return
+
+        end_date = date_info["gregorian"]
         start_date = context.user_data["advanced_start"]
+
         if end_date < start_date:
-            await update.message.reply_text("❌ تاریخ پایان نمی‌تواند قبل از تاریخ شروع باشد.", reply_markup=back_keyboard())
+            await update.message.reply_text(
+                "❌ تاریخ پایان نمی‌تواند قبل از تاریخ شروع باشد.",
+                reply_markup=back_keyboard()
+            )
             return
-        await show_advanced_report(update, context, start_date, end_date)
+
+        await show_advanced_report(
+            update,
+            context,
+            start_date,
+            end_date
+        )
+
         return
     
-    if message == "➕ ثبت هزینه":
+    # ==========================================
+    # منوی اصلی
+    # ==========================================
+    if message == "📥 ثبت هزینه":
         await expense_button(update, context)
         return
-    if message == "📊 گزارش امروز":
-        await report(update, context)
+    
+    if message == "🧾 هزینه‌های سریع":
+        await quick_expenses_menu(update, context)
         return
-    if message == "📅 گزارش ماه":
-        await monthly_report(update, context)
+    
+    if message == "📊 گزارش‌ها":
+        await reports_menu(update, context)
         return
-    if message == "📋 هزینه‌های اخیر":
-        await recent(update, context)
-        return
-    if message == "📈 گزارش پیشرفته":
-        await advanced_report_button(update, context)
-        return
-    if message == "📅 گزارش تاریخ":
-        await date_report_button(update, context)
-        return
-    if message == "🗑️ حذف/ویرایش":
+    
+    if message == "✏️ مدیریت هزینه‌ها":
         await edit_delete_menu(update, context)
         return
-    if message == "⚙️ تنظیمات":
-        await settings(update, context)
-        return
-    if message == "📊 خروجی اکسل":
+    
+    if message == "📤 خروجی اکسل":
         await export_excel(update, context)
         return
     
+    if message == "⚙️ تنظیمات":
+        await settings(update, context)
+        return
+    
+    # ==========================================
+    # ثبت هزینه با انتخاب دسته
+    # ==========================================
     if context.user_data.get("waiting_for_expense"):
         categories = [name for _, name in get_categories()]
         if message in categories:
             await choose_category(update, context, message)
             return
     
+    # ==========================================
+    # ویرایش هزینه
+    # ==========================================
     if context.user_data.get("waiting_for_edit"):
         parsed = parse_expense_text(message)
         if not parsed:
@@ -1350,27 +3089,122 @@ async def handle_message(update, context):
             )
         return
     
-    if context.user_data.get("waiting_for_amount"):
-        parsed = parse_expense_text(message)
-        if not parsed:
-            await update.message.reply_text("❌ فرمت درست نیست.\n\nمثال:\n85000 ناهار", reply_markup=back_keyboard())
-            return
-        amount, description = parsed
-        category = context.user_data.get("selected_category", "📦 سایر")
-        add_expense(user_id, amount, description, category)
+
+        # ==========================================
+    # افزودن هزینه سریع جدید (روش خیلی ساده)
+    # ==========================================
+    if context.user_data.get("waiting_quick_add"):
+        category = context.user_data.get("quick_add_category", "📦 سایر")
+        message_text = message.strip()
+        
+        # بررسی فرمت: "مبلغ توضیح" یا فقط "مبلغ"
+        parsed = parse_expense_text(message_text)
+        
+        if parsed:
+            amount, name = parsed
+        else:
+            # فقط مبلغ وارد شده
+            try:
+                amount = int(message_text)
+                # اگر نامی وارد نشده، از نام دسته‌بندی استفاده کن
+                name = category
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ فقط عدد وارد کن!\n\n"
+                    "مثال: `85000`\n"
+                    "یا: `85000 ناهار`",
+                    reply_markup=back_keyboard()
+                )
+                return
+
+        # ذخیره در دیتابیس هزینه‌های سریع
+        add_quick_expense(user_id, name, amount, category)
+
         context.user_data.clear()
         await update.message.reply_text(
-            f"✅ هزینه ثبت شد!\n\n{category}\n💰 {amount:,} تومان\n📝 {description}",
+            f"✅ **هزینه سریع جدید اضافه شد!**\n\n"
+            f"📝 {name}\n"
+            f"💰 {amount:,} تومان\n"
+            f"📂 {category}\n\n"
+            "می‌توانی از منوی هزینه‌های سریع استفاده کنی.",
             reply_markup=main_keyboard()
         )
         return
-    
+
+    # ==========================================
+    # ویرایش هزینه سریع
+    # ==========================================
+    if context.user_data.get("waiting_quick_edit"):
+        quick_id = context.user_data.get("quick_edit_id")
+        old_name = context.user_data.get("quick_edit_name")
+        
+        if not quick_id:
+            await update.message.reply_text("❌ خطا در ویرایش.", reply_markup=main_keyboard())
+            return
+
+        if '|' in message:
+            parts = message.split('|')
+            if len(parts) != 3:
+                await update.message.reply_text(
+                    "❌ فرمت اشتباه!\n\n"
+                    "فرمت درست:\n"
+                    "`نام|مبلغ|دسته‌بندی`\n\n"
+                    "مثال:\n"
+                    "`صبحانه|45000|🍔 غذا`",
+                    reply_markup=back_keyboard()
+                )
+                return
+            name = parts[0].strip()
+            try:
+                amount = int(parts[1].strip())
+            except ValueError:
+                await update.message.reply_text("❌ مبلغ باید عدد باشد.", reply_markup=back_keyboard())
+                return
+            category = parts[2].strip()
+            categories = [cat for _, cat in get_categories()]
+            if category not in categories:
+                await update.message.reply_text(
+                    f"❌ دسته‌بندی «{category}» وجود ندارد.",
+                    reply_markup=back_keyboard()
+                )
+                return
+        else:
+            try:
+                amount = int(message.strip())
+            except ValueError:
+                await update.message.reply_text("❌ مبلغ باید عدد باشد.", reply_markup=back_keyboard())
+                return
+            response = supabase.table("quick_expenses").select("*").eq("id", quick_id).eq("user_id", user_id).execute()
+            if not response.data:
+                await update.message.reply_text("❌ هزینه سریع پیدا نشد.", reply_markup=main_keyboard())
+                return
+            item = response.data[0]
+            name = item["name"]
+            category = item["category"]
+
+        updated = update_quick_expense(user_id, quick_id, name, amount, category)
+        context.user_data.clear()
+        if updated:
+            await update.message.reply_text(
+                f"✅ **هزینه {name} ویرایش شد!**\n\n"
+                f"💰 مبلغ جدید: {amount:,} تومان\n"
+                f"📂 {category}",
+                reply_markup=main_keyboard()
+            )
+        else:
+            await update.message.reply_text("❌ خطا در ویرایش.", reply_markup=main_keyboard())
+        return
+
+    # ==========================================
+    # ثبت سریع هزینه (بدون دسته)
+    # ==========================================
     parsed = parse_expense_text(message)
     if parsed:
         amount, description = parsed
-        add_expense(user_id, amount, description, "📦 سایر")
+        category = detect_category(description)
+        add_expense(user_id, amount, description, category)
         await update.message.reply_text(
-            f"✅ هزینه ثبت شد!\n\n📦 سایر\n💰 {amount:,} تومان\n📝 {description}",
+            f"✅ هزینه ثبت شد!\n\n{category}\n💰 {amount:,} تومان\n📝 {description}",
             reply_markup=main_keyboard()
         )
         return
@@ -1380,6 +3214,63 @@ async def handle_message(update, context):
         reply_markup=main_keyboard()
     )
 
+async def reports_menu_callback(update, context):
+    """بازگشت به منوی گزارش‌ها"""
+
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+
+    if not is_allowed(user_id):
+        return
+
+    context.user_data.clear()
+
+    buttons = [
+        [
+            InlineKeyboardButton(
+                "📊 گزارش امروز",
+                callback_data="report_today"
+            ),
+            InlineKeyboardButton(
+                "📅 گزارش تاریخ",
+                callback_data="report_date"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "📊 گزارش ماه",
+                callback_data="report_month"
+            ),
+            InlineKeyboardButton(
+                "📈 گزارش پیشرفته",
+                callback_data="report_advanced"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "📋 هزینه‌های اخیر",
+                callback_data="report_recent"
+            ),
+            InlineKeyboardButton(
+                "📊 آمار کلی",
+                callback_data="report_stats"
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                "🔙 بازگشت",
+                callback_data="back_menu"
+            )
+        ]
+    ]
+
+    await query.edit_message_text(
+        "📊 گزارش‌ها\n\n"
+        "نوع گزارش موردنظر را انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 # ==========================================
 # اجرای ربات
 # ==========================================
@@ -1405,8 +3296,28 @@ def main():
     app.add_handler(CallbackQueryHandler(confirm_category_delete_callback, pattern=r"^confirm_category_delete:\d+$"))
     app.add_handler(CallbackQueryHandler(settings_menu_callback, pattern=r"^settings_menu$"))
     app.add_handler(CallbackQueryHandler(back_callback, pattern=r"^back_menu$"))
-    
+    app.add_handler(CallbackQueryHandler(edit_page_callback, pattern=r"^edit_page:\d+$"))
+    app.add_handler(CallbackQueryHandler(advanced_quick_callback, pattern=r"^adv_"))
+    app.add_handler(CallbackQueryHandler(ignore_callback, pattern=r"^ignore$"))
+    app.add_handler(CallbackQueryHandler(report_page_callback, pattern=r"^report_page:\d+$"))
+    app.add_handler(CallbackQueryHandler(date_page_callback, pattern=r"^date_page:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # ==========================================
+    # مدیریت هزینه‌های سریع
+    # ==========================================
+    app.add_handler(CallbackQueryHandler(quick_manage_callback, pattern=r"^quick_manage$"))
+    app.add_handler(CallbackQueryHandler(quick_add_callback, pattern=r"^quick_add$"))
+    app.add_handler(CallbackQueryHandler(quick_edit_callback, pattern=r"^quick_edit$"))
+    app.add_handler(CallbackQueryHandler(quick_delete_callback, pattern=r"^quick_delete$"))
+    app.add_handler(CallbackQueryHandler(quick_menu_callback, pattern=r"^quick_menu$"))
+    app.add_handler(CallbackQueryHandler(quick_callback, pattern=r"^quick_\d+$"))
+    app.add_handler(CallbackQueryHandler(quick_edit_select_callback, pattern=r"^quick_edit_select_"))
+    app.add_handler(CallbackQueryHandler(quick_delete_confirm_callback, pattern=r"^quick_delete_confirm_"))
+    app.add_handler(CallbackQueryHandler(quick_add_category_callback, pattern=r"^quick_add_cat_"))
+
+    app.add_handler(CallbackQueryHandler(reports_menu_callback, pattern=r"^reports_menu$"))
+    app.add_handler(CallbackQueryHandler(reports_callback, pattern=r"^report_(today|date|month|advanced|recent|stats)$"))
     
     print("✅ ربات اجرا شد!")
     app.run_polling()
