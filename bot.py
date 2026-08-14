@@ -597,16 +597,19 @@ async def export_excel(update, context):
     user_id = update.effective_user.id
 
     if not is_allowed(user_id):
-        await update.message.reply_text("⛔ شما اجازه استفاده از این بخش را ندارید.")
+        await update.message.reply_text(
+            "⛔ شما اجازه استفاده از این بخش را ندارید."
+        )
         return
 
     month = datetime.now().strftime("%Y-%m")
 
     try:
-        # ابتدای ماه جاری
+        # ==========================================
+        # محاسبه بازه ماه
+        # ==========================================
         start_date = f"{month}-01 00:00:00"
 
-        # اولین روز ماه بعد
         current_month = datetime.now()
 
         if current_month.month == 12:
@@ -628,7 +631,9 @@ async def export_excel(update, context):
             f"start={start_date} | end={end_date}"
         )
 
-        # دریافت هزینه‌های ماه جاری
+        # ==========================================
+        # دریافت هزینه‌ها از Supabase
+        # ==========================================
         response = (
             supabase
             .table("expenses")
@@ -636,13 +641,11 @@ async def export_excel(update, context):
             .eq("user_id", user_id)
             .gte("created_at", start_date)
             .lt("created_at", end_date)
-            .order("created_at", desc=False)
+            .order("created_at", desc=True)
             .execute()
         )
 
         rows = response.data or []
-
-        logger.info(f"Export Excel | found {len(rows)} expenses")
 
         if not rows:
             await update.message.reply_text(
@@ -651,11 +654,67 @@ async def export_excel(update, context):
             )
             return
 
-        # ساخت فایل اکسل
+        # ==========================================
+        # Importهای مربوط به Excel
+        # ==========================================
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+        from openpyxl.chart import PieChart, BarChart, Reference
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+
+        # ==========================================
+        # ساخت Workbook
+        # ==========================================
         wb = Workbook()
+
+        # ==========================================
+        # شیت اول: هزینه‌ها
+        # ==========================================
         ws = wb.active
         ws.title = "هزینه‌ها"
 
+        # ==========================================
+        # عنوان فایل
+        # ==========================================
+        ws.merge_cells("A1:F1")
+        ws["A1"] = f"💰 گزارش هزینه‌های ماه {month}"
+
+        ws["A1"].font = Font(
+            bold=True,
+            size=18
+        )
+
+        ws["A1"].alignment = Alignment(
+            horizontal="center",
+            vertical="center"
+        )
+
+        ws.row_dimensions[1].height = 35
+
+        # ==========================================
+        # اطلاعات خلاصه
+        # ==========================================
+        total = sum(int(row.get("amount", 0)) for row in rows)
+        count = len(rows)
+
+        ws["A2"] = "تعداد هزینه‌ها"
+        ws["B2"] = count
+
+        ws["D2"] = "مجموع هزینه"
+        ws["E2"] = total
+
+        ws["A2"].font = Font(bold=True)
+        ws["D2"].font = Font(bold=True)
+
+        ws["B2"].font = Font(bold=True)
+        ws["E2"].font = Font(bold=True)
+
+        # فرمت مبلغ
+        ws["E2"].number_format = '#,##0" تومان"'
+
+        # ==========================================
+        # هدر جدول
+        # ==========================================
         headers = [
             "ردیف",
             "دسته‌بندی",
@@ -665,92 +724,467 @@ async def export_excel(update, context):
             "ساعت"
         ]
 
-        ws.append(headers)
+        header_row = 4
 
-        # استایل هدر
-        from openpyxl.styles import Font, Alignment
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(
+                row=header_row,
+                column=col,
+                value=header
+            )
 
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-            cell.alignment = Alignment(horizontal="center")
+            cell.font = Font(
+                bold=True,
+                size=11
+            )
 
-        # اطلاعات هزینه‌ها
-        total = 0
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center"
+            )
 
+        # ==========================================
+        # وارد کردن اطلاعات
+        # ==========================================
         for i, row in enumerate(rows, start=1):
 
             created_at = str(row.get("created_at", ""))
 
-            date_part = created_at[:10] if len(created_at) >= 10 else ""
-            time_part = created_at[11:16] if len(created_at) >= 16 else ""
+            date_part = (
+                created_at[:10]
+                if len(created_at) >= 10
+                else ""
+            )
+
+            time_part = (
+                created_at[11:16]
+                if len(created_at) >= 16
+                else ""
+            )
 
             amount = int(row.get("amount", 0))
 
-            ws.append([
-                i,
-                row.get("category", ""),
-                amount,
-                row.get("description", ""),
-                date_part,
-                time_part
-            ])
+            excel_row = header_row + i
 
-            total += amount
+            ws.cell(excel_row, 1, i)
+            ws.cell(excel_row, 2, row.get("category", ""))
+            ws.cell(excel_row, 3, amount)
+            ws.cell(excel_row, 4, row.get("description", ""))
+            ws.cell(excel_row, 5, date_part)
+            ws.cell(excel_row, 6, time_part)
 
-        # جمع کل
-        ws.append([])
-        ws.append([
-            "",
-            "",
-            total,
-            "جمع کل",
-            "",
-            ""
-        ])
+            # فرمت مبلغ
+            ws.cell(
+                excel_row,
+                3
+            ).number_format = '#,##0" تومان"'
 
-        # تنظیمات فایل
-        ws.freeze_panes = "A2"
+            # تراز وسط برای اطلاعات عددی
+            ws.cell(excel_row, 1).alignment = Alignment(
+                horizontal="center"
+            )
 
-        ws.column_dimensions["A"].width = 8
-        ws.column_dimensions["B"].width = 20
-        ws.column_dimensions["C"].width = 18
-        ws.column_dimensions["D"].width = 40
+            ws.cell(excel_row, 3).alignment = Alignment(
+                horizontal="center"
+            )
+
+            ws.cell(excel_row, 5).alignment = Alignment(
+                horizontal="center"
+            )
+
+            ws.cell(excel_row, 6).alignment = Alignment(
+                horizontal="center"
+            )
+
+            # راست‌چین برای متن
+            ws.cell(excel_row, 2).alignment = Alignment(
+                horizontal="right"
+            )
+
+            ws.cell(excel_row, 4).alignment = Alignment(
+                horizontal="right"
+            )
+
+        # ==========================================
+        # ردیف جمع کل
+        # ==========================================
+        total_row = header_row + len(rows) + 2
+
+        ws.cell(total_row, 2, "💰 جمع کل")
+        ws.cell(total_row, 3, total)
+
+        ws.cell(total_row, 2).font = Font(
+            bold=True,
+            size=12
+        )
+
+        ws.cell(total_row, 3).font = Font(
+            bold=True,
+            size=12
+        )
+
+        ws.cell(
+            total_row,
+            3
+        ).number_format = '#,##0" تومان"'
+
+        # ==========================================
+        # جدول Excel
+        # ==========================================
+        table_end_row = header_row + len(rows)
+
+        table_ref = f"A{header_row}:F{table_end_row}"
+
+        tab = Table(
+            displayName="ExpensesTable",
+            ref=table_ref
+        )
+
+        style = TableStyleInfo(
+            name="TableStyleMedium2",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False
+        )
+
+        tab.tableStyleInfo = style
+        ws.add_table(tab)
+
+        # ==========================================
+        # فریز کردن هدر
+        # ==========================================
+        ws.freeze_panes = "A5"
+
+        # ==========================================
+        # فیلتر
+        # ==========================================
+        ws.auto_filter.ref = table_ref
+
+        # ==========================================
+        # عرض ستون‌ها
+        # ==========================================
+        ws.column_dimensions["A"].width = 10
+        ws.column_dimensions["B"].width = 22
+        ws.column_dimensions["C"].width = 20
+        ws.column_dimensions["D"].width = 45
         ws.column_dimensions["E"].width = 16
         ws.column_dimensions["F"].width = 12
 
-        # وسط‌چین کردن ستون‌های مشخص
-        for row in ws.iter_rows(
-            min_row=1,
-            max_row=ws.max_row
-        ):
-            row[0].alignment = Alignment(horizontal="center")
-            row[1].alignment = Alignment(horizontal="center")
-            row[2].alignment = Alignment(horizontal="center")
-            row[4].alignment = Alignment(horizontal="center")
-            row[5].alignment = Alignment(horizontal="center")
+        # ==========================================
+        # راست‌چین و Wrap Text
+        # ==========================================
+        for row in ws.iter_rows():
+            for cell in row:
+                cell.alignment = Alignment(
+                    horizontal=cell.alignment.horizontal or "right",
+                    vertical="center",
+                    wrap_text=True
+                )
 
-        # ذخیره در حافظه
+        # ==========================================
+        # شیت دوم: گزارش ماه
+        # ==========================================
+        report_ws = wb.create_sheet("گزارش ماه")
+
+        report_ws.merge_cells("A1:D1")
+        report_ws["A1"] = f"📊 خلاصه هزینه‌های ماه {month}"
+
+        report_ws["A1"].font = Font(
+            bold=True,
+            size=18
+        )
+
+        report_ws["A1"].alignment = Alignment(
+            horizontal="center",
+            vertical="center"
+        )
+
+        report_ws.row_dimensions[1].height = 35
+
+        # ==========================================
+        # اطلاعات کلی
+        # ==========================================
+        report_ws["A3"] = "مجموع هزینه‌ها"
+        report_ws["B3"] = total
+
+        report_ws["A4"] = "تعداد هزینه‌ها"
+        report_ws["B4"] = count
+
+        average = total // count if count else 0
+
+        report_ws["A5"] = "میانگین هر هزینه"
+        report_ws["B5"] = average
+
+        for cell in ["A3", "A4", "A5"]:
+            report_ws[cell].font = Font(bold=True)
+
+        for cell in ["B3", "B5"]:
+            report_ws[cell].number_format = '#,##0" تومان"'
+
+        # ==========================================
+        # محاسبه دسته‌بندی‌ها
+        # ==========================================
+        categories = {}
+
+        for row in rows:
+
+            category = row.get(
+                "category",
+                "📦 سایر"
+            )
+
+            amount = int(
+                row.get("amount", 0)
+            )
+
+            if category not in categories:
+                categories[category] = {
+                    "total": 0,
+                    "count": 0
+                }
+
+            categories[category]["total"] += amount
+            categories[category]["count"] += 1
+
+        # مرتب‌سازی از بیشترین هزینه
+        sorted_categories = sorted(
+            categories.items(),
+            key=lambda x: x[1]["total"],
+            reverse=True
+        )
+
+        # ==========================================
+        # جدول دسته‌بندی‌ها
+        # ==========================================
+        category_header_row = 8
+
+        category_headers = [
+            "دسته‌بندی",
+            "مجموع (تومان)",
+            "تعداد",
+            "درصد از کل"
+        ]
+
+        for col, header in enumerate(
+            category_headers,
+            start=1
+        ):
+
+            cell = report_ws.cell(
+                category_header_row,
+                col,
+                header
+            )
+
+            cell.font = Font(
+                bold=True
+            )
+
+            cell.alignment = Alignment(
+                horizontal="center"
+            )
+
+        # ==========================================
+        # اطلاعات دسته‌ها
+        # ==========================================
+        for i, (category, data) in enumerate(
+            sorted_categories,
+            start=1
+        ):
+
+            row_num = category_header_row + i
+
+            category_total = data["total"]
+            category_count = data["count"]
+
+            percentage = (
+                category_total / total
+                if total > 0
+                else 0
+            )
+
+            report_ws.cell(
+                row_num,
+                1,
+                category
+            )
+
+            report_ws.cell(
+                row_num,
+                2,
+                category_total
+            )
+
+            report_ws.cell(
+                row_num,
+                3,
+                category_count
+            )
+
+            report_ws.cell(
+                row_num,
+                4,
+                percentage
+            )
+
+            report_ws.cell(
+                row_num,
+                2
+            ).number_format = '#,##0" تومان"'
+
+            report_ws.cell(
+                row_num,
+                4
+            ).number_format = "0.00%"
+
+        # ==========================================
+        # جدول دسته‌بندی
+        # ==========================================
+        category_end_row = (
+            category_header_row +
+            len(sorted_categories)
+        )
+
+        category_table = Table(
+            displayName="CategoryTable",
+            ref=f"A{category_header_row}:D{category_end_row}"
+        )
+
+        category_style = TableStyleInfo(
+            name="TableStyleMedium4",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False
+        )
+
+        category_table.tableStyleInfo = category_style
+
+        report_ws.add_table(category_table)
+
+        # ==========================================
+        # نمودار دایره‌ای
+        # ==========================================
+        if len(sorted_categories) > 0:
+
+            pie = PieChart()
+
+            labels = Reference(
+                report_ws,
+                min_col=1,
+                min_row=category_header_row + 1,
+                max_row=category_end_row
+            )
+
+            data = Reference(
+                report_ws,
+                min_col=2,
+                min_row=category_header_row,
+                max_row=category_end_row
+            )
+
+            pie.add_data(
+                data,
+                titles_from_data=True
+            )
+
+            pie.set_categories(labels)
+
+            pie.title = "سهم هزینه‌ها بر اساس دسته‌بندی"
+
+            pie.height = 8
+            pie.width = 12
+
+            report_ws.add_chart(
+                pie,
+                "F3"
+            )
+
+        # ==========================================
+        # نمودار میله‌ای
+        # ==========================================
+        if len(sorted_categories) > 0:
+
+            bar = BarChart()
+
+            data = Reference(
+                report_ws,
+                min_col=2,
+                min_row=category_header_row,
+                max_row=category_end_row
+            )
+
+            labels = Reference(
+                report_ws,
+                min_col=1,
+                min_row=category_header_row + 1,
+                max_row=category_end_row
+            )
+
+            bar.add_data(
+                data,
+                titles_from_data=True
+            )
+
+            bar.set_categories(labels)
+
+            bar.title = "مقایسه هزینه دسته‌بندی‌ها"
+            bar.y_axis.title = "مبلغ"
+            bar.x_axis.title = "دسته‌بندی"
+
+            bar.height = 8
+            bar.width = 14
+
+            report_ws.add_chart(
+                bar,
+                "F20"
+            )
+
+        # ==========================================
+        # عرض ستون‌های گزارش
+        # ==========================================
+        report_ws.column_dimensions["A"].width = 25
+        report_ws.column_dimensions["B"].width = 22
+        report_ws.column_dimensions["C"].width = 12
+        report_ws.column_dimensions["D"].width = 18
+
+        # ==========================================
+        # Freeze
+        # ==========================================
+        report_ws.freeze_panes = "A9"
+
+        # ==========================================
+        # ذخیره فایل در حافظه
+        # ==========================================
         output = BytesIO()
+
         wb.save(output)
+
         output.seek(0)
 
-        filename = f"expenses_{month}.xlsx"
+        filename = f"گزارش_هزینه_{month}.xlsx"
 
-        # ارسال فایل به تلگرام
+        # ==========================================
+        # ارسال فایل
+        # ==========================================
         await update.message.reply_document(
             document=output,
             filename=filename,
             caption=(
-                f"📊 گزارش هزینه‌های ماه {month}\n"
+                f"📊 گزارش کامل هزینه‌های ماه {month}\n\n"
+                f"🧾 تعداد: {count} مورد\n"
                 f"💰 مجموع: {total:,} تومان\n"
-                f"📝 تعداد: {len(rows)} مورد"
+                f"📊 میانگین: {average:,} تومان"
             ),
             reply_markup=main_keyboard()
         )
 
         logger.info(
-            f"Export Excel successful | user={user_id} | "
-            f"rows={len(rows)} | total={total}"
+            f"Export Excel successful | "
+            f"user={user_id} | "
+            f"rows={count} | "
+            f"total={total}"
         )
 
     except Exception as e:
@@ -763,7 +1197,6 @@ async def export_excel(update, context):
             f"❌ خطا در ایجاد فایل اکسل:\n\n{str(e)}",
             reply_markup=main_keyboard()
         )
-
 # ==========================================
 # هندلر اصلی پیام‌ها
 # ==========================================
