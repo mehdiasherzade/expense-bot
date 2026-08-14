@@ -137,8 +137,38 @@ def get_recent_expenses(user_id, limit=10):
     return [(row["id"], row["amount"], row["description"], row["category"], row["created_at"]) for row in response.data]
 
 def get_day_expenses(user_id, date_text):
-    response = supabase.table("expenses").select("*").eq("user_id", user_id).like("created_at", f"{date_text}%").order("id", desc=True).execute()
+    # بازه‌ی دقیق یک روز؛ مستقل از طول زمان/میلی‌ثانیه‌ی created_at
+    next_date = (datetime.strptime(date_text, "%Y-%m-%d") + __import__("datetime").timedelta(days=1)).strftime("%Y-%m-%d")
+    response = (
+        supabase.table("expenses")
+        .select("*")
+        .eq("user_id", user_id)
+        .gte("created_at", f"{date_text} 00:00:00")
+        .lt("created_at", f"{next_date} 00:00:00")
+        .order("id", desc=True)
+        .execute()
+    )
     return [(row["id"], row["amount"], row["description"], row["category"], row["created_at"]) for row in response.data]
+
+def get_month_expenses(user_id, month_text):
+    # ماه را با اولین روز ماه بعد محدود می‌کنیم؛ بنابراین برای فوریه، آوریل و ... هم درست است.
+    first_day = datetime.strptime(f"{month_text}-01", "%Y-%m-%d")
+    if first_day.month == 12:
+        next_month = first_day.replace(year=first_day.year + 1, month=1, day=1)
+    else:
+        next_month = first_day.replace(month=first_day.month + 1, day=1)
+    next_month_text = next_month.strftime("%Y-%m-%d")
+
+    response = (
+        supabase.table("expenses")
+        .select("*")
+        .eq("user_id", user_id)
+        .gte("created_at", f"{month_text}-01 00:00:00")
+        .lt("created_at", f"{next_month_text} 00:00:00")
+        .order("id", desc=True)
+        .execute()
+    )
+    return response.data
 
 def get_advanced_stats(user_id, start_date, end_date):
     response = supabase.table("expenses").select("*").eq("user_id", user_id).gte("created_at", f"{start_date} 00:00:00").lte("created_at", f"{end_date} 23:59:59").execute()
@@ -265,8 +295,7 @@ async def monthly_report(update, context):
     if not is_allowed(user_id):
         return
     month = datetime.now().strftime("%Y-%m")
-    response = supabase.table("expenses").select("*").eq("user_id", user_id).like("created_at", f"{month}%").execute()
-    rows = response.data
+    rows = get_month_expenses(user_id, month)
     if not rows:
         await update.message.reply_text("📅 این ماه هنوز هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
         return
@@ -576,7 +605,9 @@ async def export_excel(update, context):
     ws.title = "هزینه‌ها"
     
     ws.append(["ردیف", "دسته‌بندی", "مبلغ (تومان)", "توضیحات", "تاریخ"])
-    
+    for cell in ws[1]:
+        cell.font = __import__("openpyxl").styles.Font(bold=True)
+
     total = 0
     for i, row in enumerate(rows, 1):
         ws.append([
@@ -591,6 +622,13 @@ async def export_excel(update, context):
     ws.append([])
     ws.append(["", "", total, "جمع کل", ""])
     
+    ws.freeze_panes = "A2"
+    ws.column_dimensions["A"].width = 10
+    ws.column_dimensions["B"].width = 20
+    ws.column_dimensions["C"].width = 18
+    ws.column_dimensions["D"].width = 40
+    ws.column_dimensions["E"].width = 16
+
     output = BytesIO()
     wb.save(output)
     output.seek(0)
