@@ -808,8 +808,8 @@ async def recent(update, context):
         await update.message.reply_text("📋 هنوز هیچ هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
         return
     text = "📋 آخرین هزینه‌ها\n\n"
-    for expense_id, amount, description, category, created_at in rows:
-        text += f"#{expense_id} {category}\n💰 {amount:,} تومان\n📝 {description}\n📅 {created_at[:10]} | 🕐 {created_at[11:16]}\n\n"
+    for display_number, (expense_id, amount, description, category, created_at) in enumerate(rows, start=1):
+        text += f"#{display_number} {category}\n💰 {amount:,} تومان\n📝 {description}\n📅 {created_at[:10]} | 🕐 {created_at[11:16]}\n\n"
     await update.message.reply_text(text, reply_markup=main_keyboard())
 
 async def stats(update, context):
@@ -1430,10 +1430,10 @@ async def edit_page_callback(update, context):
     
     # ساخت دکمه‌ها
     buttons = []
-    for expense_id, amount, description, category, created_at in rows:
+    for display_number, (expense_id, amount, description, category, created_at) in enumerate(rows, start=offset + 1):
         buttons.append([
             InlineKeyboardButton(
-                f"✏️ #{expense_id} | {amount:,} تومان",
+                f"✏️ #{display_number} | {amount:,} تومان",
                 callback_data=f"edit:{expense_id}"
             ),
             InlineKeyboardButton(
@@ -2693,18 +2693,18 @@ async def reports_callback(update, context):
 
         text = "📋 آخرین هزینه‌ها\n\n"
 
-        for expense_id, amount, description, category, created_at in rows:
+        for display_number, (expense_id, amount, description, category, created_at) in enumerate(rows, start=1):
 
             date_part = to_jalali(created_at)
 
             time = (
-                created_at[11:16]
+                 created_at[11:16]
                 if len(created_at) >= 16
                 else ""
             )
 
             text += (
-                f"#{expense_id} {category}\n"
+                f"#{display_number} {category}\n"
                 f"💰 {amount:,} تومان\n"
                 f"📝 {description}\n"
                 f"📅 {date_part} | 🕐 {time}\n\n"
