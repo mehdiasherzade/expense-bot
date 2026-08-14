@@ -1566,12 +1566,12 @@ async def manage_keywords(update, context):
         reply_markup=InlineKeyboardMarkup(buttons)
     )
     async def keyword_add_callback(update, context):
-        query = update.callback_query
-        await query.answer()
+    query = update.callback_query
+    await query.answer()
 
-        user_id = query.from_user.id
-        if not is_allowed(user_id):
-            return
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
 
     categories = get_categories()
 
@@ -1585,7 +1585,10 @@ async def manage_keywords(update, context):
         ])
 
     buttons.append([
-        InlineKeyboardButton("🔙 بازگشت", callback_data="manage_keywords")
+        InlineKeyboardButton(
+            "🔙 بازگشت",
+            callback_data="manage_keywords"
+        )
     ])
 
     await query.edit_message_text(
