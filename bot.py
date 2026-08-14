@@ -3320,7 +3320,7 @@ def run_health_server():
     server.serve_forever()
 
 
-def main():
+
 def main():
 
     # سرور Health برای Render
