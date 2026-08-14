@@ -1,4 +1,5 @@
 import os
+import threading
 import re
 import logging
 import jdatetime
@@ -11,6 +12,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandl
 from telegram.request import HTTPXRequest
 from openpyxl import Workbook
 from io import BytesIO
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 TEHRAN_TZ = ZoneInfo("Asia/Tehran")
 logging.basicConfig(
@@ -3271,12 +3273,39 @@ async def reports_menu_callback(update, context):
         "نوع گزارش موردنظر را انتخاب کن:",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
+
+    class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"OK")
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        return
+
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    print(f"Health server running on port {port}")
+    server.serve_forever()
 # ==========================================
 # اجرای ربات
 # ==========================================
 
 def main():
-    init_db()
+
+    # سرور Health برای Render
+    health_thread = threading.Thread(
+        target=run_health_server,
+        daemon=True
+    )
+    health_thread.start()
     
     request = HTTPXRequest(connect_timeout=60, read_timeout=60, write_timeout=60, pool_timeout=60)
     app = Application.builder().token(TOKEN).request(request).get_updates_request(request).build()
