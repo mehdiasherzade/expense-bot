@@ -1202,7 +1202,7 @@ async def export_excel(update, context):
                 f"📊 میانگین: {average:,} تومان"
             ),
             reply_markup=main_keyboard()
-        ))
+        )
 
         logger.info(
             f"Export Excel successful | "
