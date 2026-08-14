@@ -1,5 +1,6 @@
 import os
 import re
+import logging
 from datetime import datetime
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -9,6 +10,12 @@ from telegram.request import HTTPXRequest
 from openpyxl import Workbook
 from io import BytesIO
 
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+
+logger = logging.getLogger(__name__)
 # ==========================================
 # بارگذاری متغیرهای محیطی
 # ==========================================
@@ -588,65 +595,122 @@ async def settings_menu_callback(update, context):
 
 async def export_excel(update, context):
     user_id = update.effective_user.id
+
     if not is_allowed(user_id):
+        await update.message.reply_text("⛔ شما اجازه استفاده از این بخش را ندارید.")
         return
-    
+
     month = datetime.now().strftime("%Y-%m")
-    
+
     try:
-        # روش صحیح برای فیلتر کردن بر اساس ماه
+        # ابتدای ماه جاری
         start_date = f"{month}-01 00:00:00"
-        # محاسبه روز اول ماه بعد
+
+        # اولین روز ماه بعد
         current_month = datetime.now()
+
         if current_month.month == 12:
-            next_month = current_month.replace(year=current_month.year + 1, month=1, day=1)
+            next_month = current_month.replace(
+                year=current_month.year + 1,
+                month=1,
+                day=1
+            )
         else:
-            next_month = current_month.replace(month=current_month.month + 1, day=1)
-        end_date = next_month.strftime("%Y-%m-01 00:00:00")
-        
+            next_month = current_month.replace(
+                month=current_month.month + 1,
+                day=1
+            )
+
+        end_date = next_month.strftime("%Y-%m-%d 00:00:00")
+
+        logger.info(
+            f"Export Excel | user={user_id} | "
+            f"start={start_date} | end={end_date}"
+        )
+
+        # دریافت هزینه‌های ماه جاری
         response = (
-            supabase.table("expenses")
+            supabase
+            .table("expenses")
             .select("*")
             .eq("user_id", user_id)
             .gte("created_at", start_date)
             .lt("created_at", end_date)
+            .order("created_at", desc=False)
             .execute()
         )
-        rows = response.data
-        
+
+        rows = response.data or []
+
+        logger.info(f"Export Excel | found {len(rows)} expenses")
+
         if not rows:
-            await update.message.reply_text("📊 این ماه هنوز هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
+            await update.message.reply_text(
+                "📊 این ماه هنوز هزینه‌ای ثبت نشده.",
+                reply_markup=main_keyboard()
+            )
             return
-        
+
+        # ساخت فایل اکسل
         wb = Workbook()
         ws = wb.active
         ws.title = "هزینه‌ها"
-        
-        # هدرها
-        headers = ["ردیف", "دسته‌بندی", "مبلغ (تومان)", "توضیحات", "تاریخ", "ساعت"]
-        ws.append(headers)
-        for cell in ws[1]:
-            cell.font = __import__("openpyxl").styles.Font(bold=True)
-            cell.alignment = __import__("openpyxl").styles.Alignment(horizontal="center")
 
+        headers = [
+            "ردیف",
+            "دسته‌بندی",
+            "مبلغ (تومان)",
+            "توضیحات",
+            "تاریخ",
+            "ساعت"
+        ]
+
+        ws.append(headers)
+
+        # استایل هدر
+        from openpyxl.styles import Font, Alignment
+
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+
+        # اطلاعات هزینه‌ها
         total = 0
-        for i, row in enumerate(rows, 1):
+
+        for i, row in enumerate(rows, start=1):
+
+            created_at = str(row.get("created_at", ""))
+
+            date_part = created_at[:10] if len(created_at) >= 10 else ""
+            time_part = created_at[11:16] if len(created_at) >= 16 else ""
+
+            amount = int(row.get("amount", 0))
+
             ws.append([
                 i,
-                row["category"],
-                row["amount"],
-                row["description"],
-                row["created_at"][:10],
-                row["created_at"][11:16] if len(row["created_at"]) > 11 else ""
+                row.get("category", ""),
+                amount,
+                row.get("description", ""),
+                date_part,
+                time_part
             ])
-            total += row["amount"]
-        
-        # ردیف جمع کل
+
+            total += amount
+
+        # جمع کل
         ws.append([])
-        ws.append(["", "", total, "جمع کل", "", ""])
-        
-        # تنظیم عرض ستون‌ها
+        ws.append([
+            "",
+            "",
+            total,
+            "جمع کل",
+            "",
+            ""
+        ])
+
+        # تنظیمات فایل
         ws.freeze_panes = "A2"
+
         ws.column_dimensions["A"].width = 8
         ws.column_dimensions["B"].width = 20
         ws.column_dimensions["C"].width = 18
@@ -654,23 +718,49 @@ async def export_excel(update, context):
         ws.column_dimensions["E"].width = 16
         ws.column_dimensions["F"].width = 12
 
+        # وسط‌چین کردن ستون‌های مشخص
+        for row in ws.iter_rows(
+            min_row=1,
+            max_row=ws.max_row
+        ):
+            row[0].alignment = Alignment(horizontal="center")
+            row[1].alignment = Alignment(horizontal="center")
+            row[2].alignment = Alignment(horizontal="center")
+            row[4].alignment = Alignment(horizontal="center")
+            row[5].alignment = Alignment(horizontal="center")
+
         # ذخیره در حافظه
         output = BytesIO()
         wb.save(output)
         output.seek(0)
-        
-        # ارسال فایل
+
+        filename = f"expenses_{month}.xlsx"
+
+        # ارسال فایل به تلگرام
         await update.message.reply_document(
             document=output,
-            filename=f"هزینه‌های_{month}.xlsx",
-            caption=f"📊 گزارش هزینه‌های ماه {month}\n💰 مجموع: {total:,} تومان\n📝 تعداد: {len(rows)} مورد",
+            filename=filename,
+            caption=(
+                f"📊 گزارش هزینه‌های ماه {month}\n"
+                f"💰 مجموع: {total:,} تومان\n"
+                f"📝 تعداد: {len(rows)} مورد"
+            ),
             reply_markup=main_keyboard()
         )
-        
+
+        logger.info(
+            f"Export Excel successful | user={user_id} | "
+            f"rows={len(rows)} | total={total}"
+        )
+
     except Exception as e:
-        logger.error(f"خطا در خروجی اکسل: {e}")
+
+        logger.exception(
+            f"خطا در خروجی اکسل برای user={user_id}"
+        )
+
         await update.message.reply_text(
-            f"❌ خطا در ایجاد فایل اکسل: {str(e)}",
+            f"❌ خطا در ایجاد فایل اکسل:\n\n{str(e)}",
             reply_markup=main_keyboard()
         )
 
