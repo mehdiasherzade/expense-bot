@@ -3095,38 +3095,36 @@ async def handle_message(update, context):
             await choose_category(update, context, message)
             return
 
+        # ==========================================
+    # ثبت مبلغ و توضیح بعد از انتخاب دسته
     # ==========================================
-# ثبت مبلغ و توضیح بعد از انتخاب دسته
-# ==========================================
-if context.user_data.get("waiting_for_amount"):
-    parsed = parse_expense_text(message)
+    if context.user_data.get("waiting_for_amount"):
+        parsed = parse_expense_text(message)
 
-    if not parsed:
+        if not parsed:
+            await update.message.reply_text(
+                "❌ فرمت درست نیست.\n\n"
+                "مثال:\n"
+                "85000 ناهار",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        amount, description = parsed
+        category = context.user_data.get("selected_category", "📦 سایر")
+
+        add_expense(user_id, amount, description, category)
+
+        context.user_data.clear()
+
         await update.message.reply_text(
-            "❌ فرمت درست نیست.\n\n"
-            "مثال:\n"
-            "85000 ناهار",
-            reply_markup=back_keyboard()
+            f"✅ هزینه ثبت شد!\n\n"
+            f"{category}\n"
+            f"💰 {amount:,} تومان\n"
+            f"📝 {description}",
+            reply_markup=main_keyboard()
         )
         return
-
-    amount, description = parsed
-
-    # استفاده از همان دسته‌ای که کاربر انتخاب کرده
-    category = context.user_data.get("selected_category", "📦 سایر")
-
-    add_expense(user_id, amount, description, category)
-
-    context.user_data.clear()
-
-    await update.message.reply_text(
-        f"✅ هزینه ثبت شد!\n\n"
-        f"{category}\n"
-        f"💰 {amount:,} تومان\n"
-        f"📝 {description}",
-        reply_markup=main_keyboard()
-    )
-    return
     # ==========================================
     # ویرایش هزینه
     # ==========================================
