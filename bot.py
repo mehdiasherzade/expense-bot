@@ -916,15 +916,9 @@ async def show_date_report(update, context, date_text):
     text += f"💰 مجموع کل: {total:,} تومان\n"
     text += "━━━━━━━━━━━━\n\n"
 
-    for expense_id, amount, description, category, created_at in page_rows:
+    for display_number, (expense_id, amount, description, category, created_at) in enumerate(page_rows, start=offset + 1):
         time = created_at[11:16] if len(created_at) > 11 else ""
-
-        text += (
-            f"#{expense_id} {category}\n"
-            f"💰 {amount:,} تومان\n"
-            f"📝 {description}\n"
-            f"🕐 {time}\n\n"
-        )
+        text += f"#{display_number} {category}\n💰 {amount:,} تومان\n📝 {description} | 🕐 {time}\n\n"
 
     text += "━━━━━━━━━━━━\n"
     text += f"🧾 تعداد: {len(rows)}\n"
