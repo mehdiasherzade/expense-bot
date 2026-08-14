@@ -1518,7 +1518,53 @@ async def manage_categories(update, context):
         [InlineKeyboardButton("🔙 بازگشت", callback_data="settings_menu")],
     ]
     await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(buttons))
+async def manage_keywords(update, context):
+    query = update.callback_query
+    await query.answer()
 
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    categories = get_categories()
+
+    text = "🔑 مدیریت کلمات دسته‌بندی\n\n"
+
+    for category_id, name in categories:
+        response = (
+            supabase
+            .table("category_keywords")
+            .select("keyword")
+            .eq("category_id", category_id)
+            .execute()
+        )
+
+        keywords = [
+            row["keyword"]
+            for row in response.data
+            if row.get("keyword")
+        ]
+
+        text += f"{name}\n"
+
+        if keywords:
+            text += "  " + "، ".join(keywords) + "\n"
+        else:
+            text += "  — کلمه‌ای ثبت نشده\n"
+
+        text += "\n"
+
+    buttons = [
+        [InlineKeyboardButton("➕ افزودن کلمه", callback_data="keyword_add")],
+        [InlineKeyboardButton("✏️ ویرایش کلمه", callback_data="keyword_edit")],
+        [InlineKeyboardButton("🗑️ حذف کلمه", callback_data="keyword_delete")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="settings_menu")],
+    ]
+
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 async def ignore_callback(update, context):
     """دکمه‌های غیرفعال (شماره صفحه)"""
     query = update.callback_query
@@ -3419,6 +3465,7 @@ def main():
     app.add_handler(CallbackQueryHandler(cancel_delete_callback, pattern=r"^cancel_delete$"))
     app.add_handler(CallbackQueryHandler(edit_callback, pattern=r"^edit:\d+$"))
     app.add_handler(CallbackQueryHandler(manage_categories, pattern=r"^manage_categories$"))
+    app.add_handler(CallbackQueryHandler(manage_keywords, pattern=r"^manage_keywords$"))
     app.add_handler(CallbackQueryHandler(category_add_callback, pattern=r"^category_add$"))
     app.add_handler(CallbackQueryHandler(category_rename_callback, pattern=r"^category_rename$"))
     app.add_handler(CallbackQueryHandler(rename_select_callback, pattern=r"^rename_select:\d+$"))
