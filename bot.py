@@ -2,7 +2,7 @@ import os
 import re
 import logging
 import jdatetime
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client, Client
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
@@ -229,6 +229,24 @@ def parse_expense_text(message):
     if amount is None or not description:
         return None
     return amount, description
+
+# ==========================================
+# تابع تبدیل تاریخ میلادی به شمسی
+# ==========================================
+def to_jalali(date_str):
+    """تبدیل تاریخ میلادی به شمسی با فرمت YYYY-MM-DD"""
+    if not date_str:
+        return ""
+    try:
+        # استخراج بخش تاریخ (10 کاراکتر اول)
+        date_part = date_str[:10]
+        year, month, day = map(int, date_part.split('-'))
+        gregorian = datetime(year, month, day)
+        jalali = jdatetime.date.fromgregorian(date=gregorian)
+        return f"{jalali.year:04d}-{jalali.month:02d}-{jalali.day:02d}"
+    except:
+        # اگر خطایی رخ داد، همان تاریخ میلادی را برگردان
+        return date_str[:10] if len(date_str) >= 10 else ""
 
 def category_keyboard():
     categories = get_categories()
@@ -677,8 +695,15 @@ async def export_excel(update, context):
         # ==========================================
         # عنوان فایل
         # ==========================================
+                # تبدیل ماه به شمسی برای عنوان
+        month_parts = month.split('-')
+        year, month_num = int(month_parts[0]), int(month_parts[1])
+        gregorian_date = datetime(year, month_num, 1)
+        jalali_date = jdatetime.date.fromgregorian(date=gregorian_date)
+        jalali_month = f"{jalali_date.year:04d}-{jalali_date.month:02d}"
+        
         ws.merge_cells("A1:F1")
-        ws["A1"] = f"💰 گزارش هزینه‌های ماه {month}"
+        ws["A1"] = f"💰 گزارش هزینه‌های ماه {jalali_month}"
 
         ws["A1"].font = Font(
             bold=True,
@@ -751,11 +776,8 @@ async def export_excel(update, context):
 
             created_at = str(row.get("created_at", ""))
 
-            date_part = (
-                created_at[:10]
-                if len(created_at) >= 10
-                else ""
-            )
+            # استفاده از تابع تبدیل به شمسی
+            date_part = to_jalali(created_at)
 
             time_part = (
                 created_at[11:16]
@@ -888,8 +910,9 @@ async def export_excel(update, context):
         # ==========================================
         report_ws = wb.create_sheet("گزارش ماه")
 
+        # استفاده از jalali_month که قبلاً محاسبه شد
         report_ws.merge_cells("A1:D1")
-        report_ws["A1"] = f"📊 خلاصه هزینه‌های ماه {month}"
+        report_ws["A1"] = f"📊 خلاصه هزینه‌های ماه {jalali_month}"
 
         report_ws["A1"].font = Font(
             bold=True,
@@ -1164,8 +1187,8 @@ async def export_excel(update, context):
 
         output.seek(0)
 
-        filename = f"گزارش_هزینه_{month}.xlsx"
-
+        filename = f"گزارش_هزینه_{jalali_month}.xlsx"
+        
         # ==========================================
         # ارسال فایل
         # ==========================================
@@ -1173,13 +1196,13 @@ async def export_excel(update, context):
             document=output,
             filename=filename,
             caption=(
-                f"📊 گزارش کامل هزینه‌های ماه {month}\n\n"
+                f"📊 گزارش کامل هزینه‌های ماه {jalali_month}\n\n"
                 f"🧾 تعداد: {count} مورد\n"
                 f"💰 مجموع: {total:,} تومان\n"
                 f"📊 میانگین: {average:,} تومان"
             ),
             reply_markup=main_keyboard()
-        )
+        ))
 
         logger.info(
             f"Export Excel successful | "
