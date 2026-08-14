@@ -304,14 +304,41 @@ def parse_expense_text(message):
     return amount, description
 
 def detect_category(description):
-    """تشخیص خودکار دسته‌بندی بر اساس توضیحات"""
-    description_lower = description.lower()
-    for category, keywords in CATEGORY_KEYWORDS.items():
-        for keyword in keywords:
-            if keyword in description_lower:
-                return category
-    return "📦 سایر"  # دسته‌بندی پیش‌فرض
+    """تشخیص خودکار دسته‌بندی بر اساس کلمات ذخیره‌شده در دیتابیس"""
 
+    description_lower = description.lower().strip()
+
+    try:
+        # دریافت کلمات کلیدی از دیتابیس
+        response = (
+            supabase
+            .table("category_keywords")
+            .select("keyword, category_id")
+            .execute()
+        )
+
+        # دریافت دسته‌بندی‌ها و ساختن نقشه ID → نام
+        categories = dict(get_categories())
+
+        # بررسی کلمات کلیدی
+        for row in response.data:
+            keyword = (row.get("keyword") or "").strip().lower()
+            category_id = row.get("category_id")
+
+            if not keyword or not category_id:
+                continue
+
+            if keyword in description_lower:
+                category = categories.get(category_id)
+
+                if category:
+                    return category
+
+    except Exception as e:
+        logger.error(f"خطا در تشخیص دسته‌بندی: {e}")
+
+    # اگر هیچ کلمه‌ای پیدا نشد
+    return "📦 سایر"
 # ==========================================
 # تابع تبدیل تاریخ میلادی به شمسی
 # ==========================================
