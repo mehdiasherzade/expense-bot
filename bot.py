@@ -1274,11 +1274,10 @@ async def edit_delete_menu(update, context):
     
     # ساخت دکمه‌ها
     buttons = []
-    for expense_id, amount, description, category, created_at in rows:
-        date_part = created_at[:10] if len(created_at) >= 10 else ""
+    for display_number, (expense_id, amount, description, category, created_at) in enumerate(rows, start=offset + 1):
         buttons.append([
             InlineKeyboardButton(
-                f"✏️ #{expense_id} | {amount:,} تومان",
+                f"✏️ #{display_number} | {amount:,} تومان",
                 callback_data=f"edit:{expense_id}"
             ),
             InlineKeyboardButton(
