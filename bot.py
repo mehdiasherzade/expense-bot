@@ -593,51 +593,86 @@ async def export_excel(update, context):
     
     month = datetime.now().strftime("%Y-%m")
     
-    response = supabase.table("expenses").select("*").eq("user_id", user_id).like("created_at", f"{month}%").execute()
-    rows = response.data
-    
-    if not rows:
-        await update.message.reply_text("📊 این ماه هنوز هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
-        return
-    
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "هزینه‌ها"
-    
-    ws.append(["ردیف", "دسته‌بندی", "مبلغ (تومان)", "توضیحات", "تاریخ"])
-    for cell in ws[1]:
-        cell.font = __import__("openpyxl").styles.Font(bold=True)
+    try:
+        # روش صحیح برای فیلتر کردن بر اساس ماه
+        start_date = f"{month}-01 00:00:00"
+        # محاسبه روز اول ماه بعد
+        current_month = datetime.now()
+        if current_month.month == 12:
+            next_month = current_month.replace(year=current_month.year + 1, month=1, day=1)
+        else:
+            next_month = current_month.replace(month=current_month.month + 1, day=1)
+        end_date = next_month.strftime("%Y-%m-01 00:00:00")
+        
+        response = (
+            supabase.table("expenses")
+            .select("*")
+            .eq("user_id", user_id)
+            .gte("created_at", start_date)
+            .lt("created_at", end_date)
+            .execute()
+        )
+        rows = response.data
+        
+        if not rows:
+            await update.message.reply_text("📊 این ماه هنوز هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
+            return
+        
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "هزینه‌ها"
+        
+        # هدرها
+        headers = ["ردیف", "دسته‌بندی", "مبلغ (تومان)", "توضیحات", "تاریخ", "ساعت"]
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = __import__("openpyxl").styles.Font(bold=True)
+            cell.alignment = __import__("openpyxl").styles.Alignment(horizontal="center")
 
-    total = 0
-    for i, row in enumerate(rows, 1):
-        ws.append([
-            i,
-            row["category"],
-            row["amount"],
-            row["description"],
-            row["created_at"][:10]
-        ])
-        total += row["amount"]
-    
-    ws.append([])
-    ws.append(["", "", total, "جمع کل", ""])
-    
-    ws.freeze_panes = "A2"
-    ws.column_dimensions["A"].width = 10
-    ws.column_dimensions["B"].width = 20
-    ws.column_dimensions["C"].width = 18
-    ws.column_dimensions["D"].width = 40
-    ws.column_dimensions["E"].width = 16
+        total = 0
+        for i, row in enumerate(rows, 1):
+            ws.append([
+                i,
+                row["category"],
+                row["amount"],
+                row["description"],
+                row["created_at"][:10],
+                row["created_at"][11:16] if len(row["created_at"]) > 11 else ""
+            ])
+            total += row["amount"]
+        
+        # ردیف جمع کل
+        ws.append([])
+        ws.append(["", "", total, "جمع کل", "", ""])
+        
+        # تنظیم عرض ستون‌ها
+        ws.freeze_panes = "A2"
+        ws.column_dimensions["A"].width = 8
+        ws.column_dimensions["B"].width = 20
+        ws.column_dimensions["C"].width = 18
+        ws.column_dimensions["D"].width = 40
+        ws.column_dimensions["E"].width = 16
+        ws.column_dimensions["F"].width = 12
 
-    output = BytesIO()
-    wb.save(output)
-    output.seek(0)
-    
-    await update.message.reply_document(
-        document=output,
-        filename=f"هزینه‌های_{month}.xlsx",
-        caption=f"📊 گزارش هزینه‌های ماه {month}\n💰 مجموع: {total:,} تومان"
-    )
+        # ذخیره در حافظه
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+        
+        # ارسال فایل
+        await update.message.reply_document(
+            document=output,
+            filename=f"هزینه‌های_{month}.xlsx",
+            caption=f"📊 گزارش هزینه‌های ماه {month}\n💰 مجموع: {total:,} تومان\n📝 تعداد: {len(rows)} مورد",
+            reply_markup=main_keyboard()
+        )
+        
+    except Exception as e:
+        logger.error(f"خطا در خروجی اکسل: {e}")
+        await update.message.reply_text(
+            f"❌ خطا در ایجاد فایل اکسل: {str(e)}",
+            reply_markup=main_keyboard()
+        )
 
 # ==========================================
 # هندلر اصلی پیام‌ها
