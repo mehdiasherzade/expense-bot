@@ -2498,7 +2498,8 @@ async def reports_callback(update, context):
         total_items = len(rows)
         total_pages = (total_items + limit - 1) // limit
 
-        page_rows = rows[:limit]
+        offset = page * limit
+        page_rows = rows[offset:offset + limit]
 
         total = sum(row[1] for row in rows)
 
