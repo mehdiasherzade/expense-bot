@@ -3949,56 +3949,56 @@ async def handle_message(update, context):
     # افزودن هزینه سریع جدید (روش خیلی ساده)
     # ==========================================
     if context.user_data.get("waiting_quick_add"):
-    category = context.user_data.get(
-        "quick_add_category",
-        "📦 سایر"
-    )
+        category = context.user_data.get(
+            "quick_add_category",
+            "📦 سایر"
+        )
 
-    message_text = normalize_digits(message.strip())
+        message_text = normalize_digits(message.strip())
 
-    # حالت:
-    # 85000 ناهار
-    parsed = parse_expense_text(message_text)
-
-    if parsed:
-        amount, name = parsed
-
-    else:
         # حالت:
-        # 85000
-        amount = parse_amount(message_text)
+        # 85000 ناهار
+        parsed = parse_expense_text(message_text)
 
-        if amount is None:
-            await update.message.reply_text(
-                "❌ مبلغ نامعتبر است.\n\n"
-                "مثال:\n"
-                "85000\n\n"
-                "یا:\n"
-                "85000 ناهار",
-                reply_markup=back_keyboard()
-            )
-            return
+        if parsed:
+            amount, name = parsed
 
-        name = category
+        else:
+            # حالت:
+            # 85000
+            amount = parse_amount(message_text)
 
-    add_quick_expense(
-        user_id,
-        name,
-        amount,
-        category
-    )
+            if amount is None:
+                await update.message.reply_text(
+                    "❌ مبلغ نامعتبر است.\n\n"
+                    "مثال:\n"
+                    "85000\n\n"
+                    "یا:\n"
+                    "85000 ناهار",
+                    reply_markup=back_keyboard()
+                )
+                return
 
-    context.user_data.clear()
+            name = category
 
-    await update.message.reply_text(
-        "✅ هزینه سریع با موفقیت اضافه شد!\n\n"
-        f"📝 {name}\n"
-        f"💰 {amount:,} تومان\n"
-        f"📂 {category}",
-        reply_markup=main_keyboard()
-    )
+        add_quick_expense(
+            user_id,
+            name,
+            amount,
+            category
+        )
 
-    return
+        context.user_data.clear()
+
+        await update.message.reply_text(
+            "✅ هزینه سریع با موفقیت اضافه شد!\n\n"
+            f"📝 {name}\n"
+            f"💰 {amount:,} تومان\n"
+            f"📂 {category}",
+            reply_markup=main_keyboard()
+        )
+
+        return
     # ==========================================
     # ویرایش هزینه سریع
     # ==========================================
