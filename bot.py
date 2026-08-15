@@ -85,15 +85,16 @@ CATEGORY_KEYWORDS = {
 def init_db():
     try:
         supabase.table("expenses").select("*").limit(1).execute()
-    except:
+    except Exception as e:
+        logger.exception(f"خطا در بررسی دیتابیس: {e}")
         print("⚠️ لطفاً جدول‌ها را در Supabase بسازید!")
         return
     
     for category in DEFAULT_CATEGORIES:
         try:
             supabase.table("categories").insert({"name": category}).execute()
-        except:
-            pass
+        except Exception as e:
+            logger.warning(f"دسته پیش‌فرض «{category}» اضافه نشد: {e}")
 
 # ==========================================
 # توابع دیتابیس
@@ -131,7 +132,8 @@ def add_category(name):
     try:
         supabase.table("categories").insert({"name": name}).execute()
         return True
-    except:
+    except Exception as e:
+        logger.exception(f"خطا در افزودن دسته: {e}")
         return False
 
 def rename_category(category_id, new_name):
@@ -846,7 +848,7 @@ async def monthly_report(update, context):
     user_id = update.effective_user.id
     if not is_allowed(user_id):
         return
-    month = datetime.now().strftime("%Y-%m")
+    month = datetime.now(TEHRAN_TZ).strftime("%Y-%m")
     rows = get_month_expenses(user_id, month)
     if not rows:
         await update.message.reply_text("📅 این ماه هنوز هزینه‌ای ثبت نشده.", reply_markup=main_keyboard())
@@ -1175,7 +1177,7 @@ async def advanced_quick_callback(update, context):
     if not is_allowed(user_id):
         return
 
-    today = datetime.now().date()
+    today = datetime.now(TEHRAN_TZ).date()
     action = query.data
 
     if action == "adv_today":
@@ -1183,14 +1185,24 @@ async def advanced_quick_callback(update, context):
         end_date = today.strftime("%Y-%m-%d")
 
     elif action == "adv_this_week":
-        # شروع هفته از دوشنبه
-        start_of_week = today - timedelta(days=today.weekday())
-        start_date = start_of_week.strftime("%Y-%m-%d")
-        end_date = today.strftime("%Y-%m-%d")
+    # هفته جاری: شنبه تا امروز
+    days_since_saturday = (today.weekday() + 2) % 7
+
+    start_of_week = today - timedelta(days=days_since_saturday)
+
+    start_date = start_of_week.strftime("%Y-%m-%d")
+    end_date = today.strftime("%Y-%m-%d")
 
     elif action == "adv_week":
-        start_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
-        end_date = today.strftime("%Y-%m-%d")
+        # هفته گذشته: شنبه تا جمعه
+        days_since_saturday = (today.weekday() + 2) % 7
+
+        start_of_this_week = today - timedelta(days=days_since_saturday)
+        start_of_last_week = start_of_this_week - timedelta(days=7)
+        end_of_last_week = start_of_this_week - timedelta(days=1)
+
+        start_date = start_of_last_week.strftime("%Y-%m-%d")
+        end_date = end_of_last_week.strftime("%Y-%m-%d")
 
     elif action == "adv_month":
         # اولین روز ماه شمسی
@@ -2207,7 +2219,8 @@ async def export_excel(update, context, from_callback=False):
         )
         return
 
-    month = datetime.now().strftime("%Y-%m")
+    current_month = datetime.now(TEHRAN_TZ)
+    month = current_month.strftime("%Y-%m")
 
     try:
         # ==========================================
