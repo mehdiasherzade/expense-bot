@@ -3415,18 +3415,18 @@ async def handle_message(update, context):
             
             await update.message.reply_text(
                 f"✅ کلمه به «{message}» تغییر کرد."
-                )
+            )
             
-                await context.bot.send_message(
-                    chat_id=update.effective_chat.id,
-                    text="🔑 مدیریت کلمات دسته‌بندی",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton("➕ افزودن کلمه", callback_data="keyword_add")],
-                        [InlineKeyboardButton("✏️ ویرایش کلمه", callback_data="keyword_edit")],
-                        [InlineKeyboardButton("🗑️ حذف کلمه", callback_data="keyword_delete")],
-                        [InlineKeyboardButton("🔙 بازگشت", callback_data="settings_menu")]
-                    ])
-                )
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="🔑 مدیریت کلمات دسته‌بندی",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("➕ افزودن کلمه", callback_data="keyword_add")],
+                    [InlineKeyboardButton("✏️ ویرایش کلمه", callback_data="keyword_edit")],
+                    [InlineKeyboardButton("🗑️ حذف کلمه", callback_data="keyword_delete")],
+                    [InlineKeyboardButton("🔙 بازگشت", callback_data="settings_menu")]
+                ])
+            )
         else:
             await update.message.reply_text(
                 "❌ ویرایش کلمه انجام نشد.",
