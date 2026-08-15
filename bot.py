@@ -3412,10 +3412,21 @@ async def handle_message(update, context):
 
         if response.data:
             context.user_data.clear()
+            
             await update.message.reply_text(
-                f"✅ کلمه به «{message}» تغییر کرد.",
-                reply_markup=main_keyboard()
-            )
+                f"✅ کلمه به «{message}» تغییر کرد."
+                )
+            
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="🔑 مدیریت کلمات دسته‌بندی",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("➕ افزودن کلمه", callback_data="keyword_add")],
+                        [InlineKeyboardButton("✏️ ویرایش کلمه", callback_data="keyword_edit")],
+                        [InlineKeyboardButton("🗑️ حذف کلمه", callback_data="keyword_delete")],
+                        [InlineKeyboardButton("🔙 بازگشت", callback_data="settings_menu")]
+                    ])
+                )
         else:
             await update.message.reply_text(
                 "❌ ویرایش کلمه انجام نشد.",
@@ -3458,8 +3469,18 @@ async def handle_message(update, context):
             context.user_data.clear()
 
             await update.message.reply_text(
-                f"✅ کلمه «{message}» با موفقیت اضافه شد.",
-                reply_markup=main_keyboard()
+                f"✅ کلمه «{message}» با موفقیت اضافه شد."
+            )
+
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="🔑 مدیریت کلمات دسته‌بندی",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("➕ افزودن کلمه", callback_data="keyword_add")],
+                    [InlineKeyboardButton("✏️ ویرایش کلمه", callback_data="keyword_edit")],
+                    [InlineKeyboardButton("🗑️ حذف کلمه", callback_data="keyword_delete")],
+                    [InlineKeyboardButton("🔙 بازگشت", callback_data="settings_menu")]
+                ])
             )
 
         except Exception as e:
