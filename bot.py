@@ -2183,6 +2183,71 @@ async def quick_add_category_callback(update, context):
             ]
         ])
     )
+async def quick_delete_ask_callback(update, context):
+    """نمایش تأیید حذف هزینه سریع"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    try:
+        quick_id = int(
+            query.data.replace("quick_delete_ask_", "")
+        )
+    except ValueError:
+        await query.edit_message_text(
+            "❌ شناسه هزینه نامعتبر است."
+        )
+        return
+
+    response = (
+        supabase
+        .table("quick_expenses")
+        .select("*")
+        .eq("id", quick_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    if not response.data:
+        await query.edit_message_text(
+            "❌ هزینه سریع پیدا نشد.",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "🔙 بازگشت",
+                        callback_data="quick_manage"
+                    )
+                ]
+            ])
+        )
+        return
+
+    item = response.data[0]
+
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "✅ بله، حذف کن",
+                callback_data=f"quick_delete_confirm_{quick_id}"
+            ),
+            InlineKeyboardButton(
+                "❌ انصراف",
+                callback_data="quick_manage"
+            )
+        ]
+    ]
+
+    await query.edit_message_text(
+        "⚠️ حذف هزینه سریع\n\n"
+        f"📝 {item['name']}\n"
+        f"💰 {item['amount']:,} تومان\n"
+        f"📂 {item['category']}\n\n"
+        "آیا مطمئنی که می‌خواهی این هزینه را حذف کنی؟",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 async def quick_delete_confirm_callback(update, context):
     """تأیید حذف هزینه سریع"""
     query = update.callback_query
@@ -2262,34 +2327,75 @@ async def quick_edit_select_callback(update, context):
     if not is_allowed(user_id):
         return
 
-    # دریافت id هزینه سریع
-    quick_id = int(query.data.replace("quick_edit_select_", ""))
-
-    # دریافت از دیتابیس
-    response = supabase.table("quick_expenses").select("*").eq("id", quick_id).eq("user_id", user_id).execute()
-    if not response.data:
-        await query.edit_message_text("❌ هزینه سریع پیدا نشد.")
+    try:
+        quick_id = int(
+            query.data.replace("quick_edit_select_", "")
+        )
+    except ValueError:
+        await query.edit_message_text(
+            "❌ شناسه هزینه نامعتبر است.",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "🔙 بازگشت",
+                        callback_data="quick_manage"
+                    )
+                ]
+            ])
+        )
         return
 
+    response = (
+        supabase
+        .table("quick_expenses")
+        .select("*")
+        .eq("id", quick_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+
+    if not response.data:
+        await query.edit_message_text(
+            "❌ هزینه سریع پیدا نشد.",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "🔙 بازگشت",
+                        callback_data="quick_manage"
+                    )
+                ]
+            ])
+        )
+        return
+
+    item = response.data[0]
+
+    # پاک کردن state قبلی
     context.user_data.clear()
 
     context.user_data["quick_edit_id"] = quick_id
     context.user_data["quick_edit_name"] = item["name"]
     context.user_data["quick_edit_category"] = item["category"]
-    context.user_data["waiting_quick_edit"] = Truee
+    context.user_data["waiting_quick_edit"] = True
 
     await query.edit_message_text(
-        f"✏️ **ویرایش {item['name']}**\n\n"
-        "مبلغ جدید رو وارد کن:\n\n"
-        f"مبلغ فعلی: {item['amount']:,} تومان\n"
-        f"دسته‌بندی: {item['category']}\n\n"
-        "مثال: `75000`\n\n"
-        "برای تغییر نام و دسته‌بندی، از فرمت زیر استفاده کن:\n"
-        "`نام جدید|مبلغ جدید|دسته‌بندی جدید`\n\n"
+        f"✏️ ویرایش «{item['name']}»\n\n"
+        "مبلغ جدید را وارد کن:\n\n"
+        f"💰 مبلغ فعلی: {item['amount']:,} تومان\n"
+        f"📂 دسته‌بندی: {item['category']}\n\n"
         "مثال:\n"
-        "`صبحانه|45000|🍔 غذا`",
+        "75000\n\n"
+        "برای تغییر نام و دسته‌بندی:\n"
+        "نام جدید|مبلغ جدید|دسته‌بندی جدید\n\n"
+        "مثال:\n"
+        "صبحانه|45000|🍔 غذا",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")]
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="quick_manage"
+                )
+            ]
         ])
     )
 
@@ -2358,7 +2464,7 @@ async def quick_delete_callback(update, context):
         buttons.append([
             InlineKeyboardButton(
                 f"🗑️ {item['name']} ({item['amount']:,})",
-                callback_data=f"quick_delete_confirm_{item['id']}"
+                callback_data=f"quick_delete_ask_{item['id']}"
             )
         ])
 
@@ -4322,6 +4428,7 @@ def main():
     app.add_handler(CallbackQueryHandler(quick_add_callback, pattern=r"^quick_add$"))
     app.add_handler(CallbackQueryHandler(quick_edit_callback, pattern=r"^quick_edit$"))
     app.add_handler(CallbackQueryHandler(quick_delete_callback, pattern=r"^quick_delete$"))
+    app.add_handler(CallbackQueryHandler(quick_delete_ask_callback, pattern=r"^quick_delete_ask_\d+$"))
     app.add_handler(CallbackQueryHandler(quick_menu_callback, pattern=r"^quick_menu$"))
     app.add_handler(CallbackQueryHandler(quick_callback, pattern=r"^quick_\d+$"))
     app.add_handler(CallbackQueryHandler(quick_edit_select_callback, pattern=r"^quick_edit_select_"))
