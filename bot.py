@@ -2193,7 +2193,23 @@ async def quick_delete_confirm_callback(update, context):
         return
 
     # دریافت id هزینه سریع
-    quick_id = int(query.data.replace("quick_delete_confirm_", ""))
+    try:
+        quick_id = int(
+            query.data.replace("quick_delete_confirm_", "")
+        )
+    except ValueError:
+        await query.edit_message_text(
+            "❌ شناسه هزینه نامعتبر است.",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "🔙 بازگشت",
+                        callback_data="quick_manage"
+                    )
+                ]
+            ])
+        )
+        return
 
     # حذف از دیتابیس
     deleted = delete_quick_expense(user_id, quick_id)
@@ -2201,37 +2217,42 @@ async def quick_delete_confirm_callback(update, context):
     if deleted:
         context.user_data.clear()
 
-    await query.edit_message_text(
-        "✅ هزینه سریع حذف شد.",
-        reply_markup=InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton(
-                    "⚙️ مدیریت هزینه‌های سریع",
-                    callback_data="quick_manage"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🧾 هزینه‌های سریع",
-                    callback_data="quick_menu"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔙 منوی اصلی",
-                    callback_data="back_menu"
-                )
-            ]
-        ])
-    )
+        await query.edit_message_text(
+            "✅ هزینه سریع حذف شد.",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "⚙️ مدیریت هزینه‌های سریع",
+                        callback_data="quick_manage"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "🧾 هزینه‌های سریع",
+                        callback_data="quick_menu"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "🔙 منوی اصلی",
+                        callback_data="back_menu"
+                    )
+                ]
+            ])
+        )
+
     else:
         await query.edit_message_text(
             "❌ خطا در حذف هزینه سریع.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")]
+                [
+                    InlineKeyboardButton(
+                        "🔙 بازگشت",
+                        callback_data="quick_manage"
+                    )
+                ]
             ])
         )
-
 async def quick_edit_select_callback(update, context):
     """انتخاب هزینه برای ویرایش"""
     query = update.callback_query
