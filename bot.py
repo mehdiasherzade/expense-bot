@@ -3415,23 +3415,29 @@ async def handle_message(update, context):
         category_id = keyword_info.data["category_id"]
 
         # بررسی تکراری نبودن کلمه در همان دسته
-        duplicate_check = (
+                # بررسی تکراری نبودن کلمه در همان دسته
+        existing_keywords = (
             supabase
             .table("category_keywords")
-            .select("id")
-            .eq("keyword", message)
+            .select("id, keyword")
             .eq("category_id", category_id)
-            .neq("id", keyword_id)
             .execute()
         )
 
-        if duplicate_check.data:
-            context.user_data.clear()
-            
-            await update.message.reply_text(
-                "❌ این کلمه قبلاً برای این دسته ثبت شده."
-            )
-            return
+        new_keyword = message.strip().casefold()
+
+        for row in existing_keywords.data or []:
+            if row["id"] != keyword_id:
+                existing_keyword = (row.get("keyword") or "").strip().casefold()
+
+                if existing_keyword == new_keyword:
+                    context.user_data.clear()
+
+                    await update.message.reply_text(
+                        "❌ این کلمه قبلاً برای این دسته ثبت شده.",
+                        reply_markup=main_keyboard()
+                    )
+                    return
 
         # انجام ویرایش
         response = (
