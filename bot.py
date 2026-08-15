@@ -3426,6 +3426,8 @@ async def handle_message(update, context):
         )
 
         if duplicate_check.data:
+            context.user_data.clear()
+            
             await update.message.reply_text(
                 "❌ این کلمه قبلاً برای این دسته ثبت شده."
             )
