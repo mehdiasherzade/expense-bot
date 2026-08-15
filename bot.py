@@ -3202,9 +3202,16 @@ async def reports_callback(update, context):
             )
 
             for category, amount in sorted_categories:
+                percentage = (
+                    (amount / total) * 100
+                    if total > 0
+                    else 0
+                )
+
                 category_text += (
                     f"{category}\n"
-                    f"💰 {amount:,} تومان\n\n"
+                    f"💰 {amount:,} تومان "
+                    f"({percentage:.1f}٪)\n\n"
                 )
         today_jalali = to_jalali(today)
 
