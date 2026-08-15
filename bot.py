@@ -2774,46 +2774,31 @@ async def export_excel(update, context, from_callback=False):
         output.seek(0)
 
         filename = f"گزارش_هزینه_{jalali_month}.xlsx"
-        
+
         # ==========================================
         # ارسال فایل
         # ==========================================
-caption = (
-    f"📊 گزارش کامل هزینه‌های ماه {jalali_month}\n\n"
-    f"🧾 تعداد: {count} مورد\n"
-    f"💰 مجموع: {total:,} تومان\n"
-    f"📊 میانگین: {average:,} تومان"
-)
+        caption = (
+            f"📊 گزارش کامل هزینه‌های ماه {jalali_month}\n\n"
+            f"🧾 تعداد: {count} مورد\n"
+            f"💰 مجموع: {total:,} تومان\n"
+            f"📊 میانگین: {average:,} تومان"
+        )
 
-if from_callback:
-    await update.callback_query.message.reply_document(
-        document=output,
-        filename=filename,
-        caption=caption,
-        reply_markup=main_keyboard()
-    )
-async def export_excel_callback(update, context):
-    """خروجی اکسل از طریق دکمه گزارش‌ها"""
-    query = update.callback_query
-    await query.answer()
-
-    user_id = query.from_user.id
-
-    if not is_allowed(user_id):
-        return
-
-    await export_excel(
-        update,
-        context,
-        from_callback=True
-    )
-else:
-    await update.message.reply_document(
-        document=output,
-        filename=filename,
-        caption=caption,
-        reply_markup=main_keyboard()
-    )
+        if from_callback:
+            await update.callback_query.message.reply_document(
+                document=output,
+                filename=filename,
+                caption=caption,
+                reply_markup=main_keyboard()
+            )
+        else:
+            await update.message.reply_document(
+                document=output,
+                filename=filename,
+                caption=caption,
+                reply_markup=main_keyboard()
+            )
 
         logger.info(
             f"Export Excel successful | "
@@ -3457,14 +3442,24 @@ async def handle_message(update, context):
                 reply_markup=main_keyboard()
             )
 
-        except Exception as e:
-            logger.error(f"خطا در افزودن کلمه کلیدی: {e}")
-            await update.message.reply_text(
-                "❌ خطا در افزودن کلمه.",
-                reply_markup=back_keyboard()
-            )
+    except Exception as e:
 
-        return
+        logger.exception(
+            f"خطا در خروجی اکسل برای user={user_id}"
+        )
+
+        error_text = f"❌ خطا در ایجاد فایل اکسل:\n\n{str(e)}"
+
+        if from_callback:
+            await update.callback_query.message.reply_text(
+                error_text,
+                reply_markup=main_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                error_text,
+                reply_markup=main_keyboard()
+            )
     # ==========================================
     # مدیریت دسته‌بندی‌ها
     # ==========================================
