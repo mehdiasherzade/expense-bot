@@ -559,13 +559,13 @@ async def quick_expenses_menu(update, context):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
     async def quick_menu_callback(update, context):
-    """بازگشت به منوی هزینه‌های سریع"""
-    query = update.callback_query
-    await query.answer()
+        """بازگشت به منوی هزینه‌های سریع"""
+        query = update.callback_query
+        await query.answer()
 
-    user_id = query.from_user.id
-    if not is_allowed(user_id):
-        return
+        user_id = query.from_user.id
+        if not is_allowed(user_id):
+            return
 
     # دریافت هزینه‌های سریع از دیتابیس
     response = (
