@@ -4080,6 +4080,10 @@ def main():
     pattern=r"^keyword_edit$"
     ))
     app.add_handler(CallbackQueryHandler(
+    keyword_edit_category_callback,
+    pattern=r"^keyword_edit_category:\d+$"
+    ))
+    app.add_handler(CallbackQueryHandler(
     keyword_edit_select_callback,
     pattern=r"^keyword_edit_select:\d+$"
     ))
