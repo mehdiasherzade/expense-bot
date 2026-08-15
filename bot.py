@@ -4109,6 +4109,9 @@ async def handle_message(update, context):
     # ویرایش هزینه سریع
     # ==========================================
     if context.user_data.get("waiting_quick_edit"):
+        print("🔥 QUICK EDIT ACTIVE")
+        print("🔥 MESSAGE:", message)
+        
         quick_id = context.user_data.get("quick_edit_id")
 
         if not quick_id:
