@@ -2195,7 +2195,7 @@ async def export_excel_callback(update, context):
         return
 
     # تابع اصلی خروجی اکسل را اجرا می‌کنیم
-    await export_excel(update, context)
+    await export_excel(update, context, from_callback=True)
 
 
 async def export_excel(update, context, from_callback=False):
@@ -2849,7 +2849,7 @@ async def reports_menu(update, context):
         [
             InlineKeyboardButton(
                 "📥 خروجی اکسل",
-                callback_data="report_month"
+                callback_data="report_excel"
             )
         ],
         [
@@ -3818,6 +3818,12 @@ async def reports_menu_callback(update, context):
                 "📋 لیست هزینه‌ها",
                 callback_data="report_recent"
             )
+        ],
+        [
+        InlineKeyboardButton(
+            "📥 خروجی اکسل",
+            callback_data="report_excel"
+        )
         ],
         [
             InlineKeyboardButton(
