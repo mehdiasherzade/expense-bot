@@ -49,9 +49,9 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 # منوی اصلی
 # ==========================================
 MAIN_KEYBOARD = [
-    ["📥 ثبت هزینه", "🧾 هزینه‌های سریع"],
+    ["📥 ثبت هزینه", "⚡️ هزینه‌های سریع"],
     ["📊 گزارش‌ها", "✏️ مدیریت هزینه‌ها"],
-    ["📤 خروجی اکسل", "⚙️ تنظیمات"],
+    ["⚙️ تنظیمات"],
 ]
 
 def main_keyboard():
@@ -2821,13 +2821,20 @@ async def export_excel(update, context, from_callback=False):
         )
 
     except Exception as e:
+    logger.exception(
+        f"خطا در خروجی اکسل برای user={user_id}"
+    )
 
-        logger.exception(
-            f"خطا در خروجی اکسل برای user={user_id}"
+    error_text = f"❌ خطا در ایجاد فایل اکسل:\n\n{str(e)}"
+
+    if from_callback:
+        await update.callback_query.message.reply_text(
+            error_text,
+            reply_markup=main_keyboard()
         )
-
+    else:
         await update.message.reply_text(
-            f"❌ خطا در ایجاد فایل اکسل:\n\n{str(e)}",
+            error_text,
             reply_markup=main_keyboard()
         )
 # ==========================================
@@ -3337,7 +3344,7 @@ async def reports_callback(update, context):
             ],
             [
                 InlineKeyboardButton(
-                    "🔙 بازگشت",
+                    "🔙 بازگشت به گزارش‌ها",
                     callback_data="reports_menu"
                 )
             ]
@@ -3606,10 +3613,6 @@ async def handle_message(update, context):
     
     if message == "✏️ مدیریت هزینه‌ها":
         await edit_delete_menu(update, context)
-        return
-    
-    if message == "📤 خروجی اکسل":
-        await export_excel(update, context)
         return
     
     if message == "⚙️ تنظیمات":
