@@ -2798,19 +2798,34 @@ async def reports_menu(update, context):
 
     buttons = [
         [
-            InlineKeyboardButton("📊 گزارش امروز", callback_data="report_today"),
-            InlineKeyboardButton("📅 گزارش تاریخ", callback_data="report_date"),
+            InlineKeyboardButton(
+                "📊 خلاصه مالی",
+                callback_data="report_stats"
+            )
         ],
         [
-            InlineKeyboardButton("📊 گزارش ماه", callback_data="report_month"),
-            InlineKeyboardButton("📈 گزارش پیشرفته", callback_data="report_advanced"),
+            InlineKeyboardButton(
+                "📅 گزارش بر اساس تاریخ",
+                callback_data="report_advanced"
+            )
         ],
         [
-            InlineKeyboardButton("📋 هزینه‌های اخیر", callback_data="report_recent"),
-            InlineKeyboardButton("📊 آمار کلی", callback_data="report_stats"),
+            InlineKeyboardButton(
+                "📋 لیست هزینه‌ها",
+                callback_data="report_recent"
+            )
         ],
         [
-            InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")
+            InlineKeyboardButton(
+                "📥 خروجی اکسل",
+                callback_data="report_month"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "🔙 بازگشت",
+                callback_data="back_menu"
+            )
         ]
     ]
 
