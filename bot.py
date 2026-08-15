@@ -1156,7 +1156,7 @@ async def advanced_report_button(update, context):
             InlineKeyboardButton("📅 سه ماه اخیر", callback_data="adv_quarter"),
             InlineKeyboardButton("✏️ وارد کردن دستی", callback_data="adv_manual"),
         ],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")],
+        [InlineKeyboardButton("🔙 بازگشت به گزارش‌ها", callback_data="reports_menu")],
     ]
     
     await update.message.reply_text(
@@ -3063,7 +3063,7 @@ async def reports_callback(update, context):
 
             return
 
-        text = "📋 آخرین هزینه‌ها\n\n"
+        text = "📋 لیست هزینه‌ها\n\n"
 
         for display_number, (expense_id, amount, description, category, created_at) in enumerate(rows, start=1):
 
@@ -3177,7 +3177,7 @@ async def reports_callback(update, context):
             int(row["amount"])
             for row in month_rows
         )
-                # تفکیک هزینه‌ها بر اساس دسته‌بندی
+        # تفکیک هزینه‌ها بر اساس دسته‌بندی
         category_totals = {}
 
         for row in rows:
