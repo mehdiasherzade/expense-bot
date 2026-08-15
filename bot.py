@@ -3800,7 +3800,7 @@ async def handle_message(update, context):
         await expense_button(update, context)
         return
     
-    if message == "🧾 هزینه‌های سریع":
+    if message == "⚡️ هزینه‌های سریع":
         await quick_expenses_menu(update, context)
         return
     
