@@ -4102,83 +4102,83 @@ async def handle_message(update, context):
         )
 
         return
-# ==========================================
-# ✅ ویرایش هزینه سریع (اصلاح شده)
-# ==========================================
-if context.user_data.get("waiting_quick_edit"):
-    quick_id = context.user_data.get("quick_edit_id")
-    
-    if not quick_id:
-        context.user_data.clear()
-        await update.message.reply_text(
-            "❌ اطلاعات ویرایش پیدا نشد.",
-            reply_markup=main_keyboard()
-        )
-        return
-    
-    message_text = normalize_digits(message.strip())
-    
-    # ------------------------------------------
-    # حالت کامل: نام|مبلغ|دسته‌بندی
-    # ------------------------------------------
-    if "|" in message_text:
-        parts = [part.strip() for part in message_text.split("|")]
+    # ==========================================
+    # ✅ ویرایش هزینه سریع (اصلاح شده)
+    # ==========================================
+    if context.user_data.get("waiting_quick_edit"):
+        quick_id = context.user_data.get("quick_edit_id")
         
-        if len(parts) != 3:
+        if not quick_id:
+            context.user_data.clear()
             await update.message.reply_text(
-                "❌ فرمت اشتباه است.\n\n"
-                "فرمت صحیح:\n"
-                "نام|مبلغ|دسته‌بندی\n\n"
-                "مثال:\n"
-                "صبحانه|45000|🍔 غذا",
-                reply_markup=back_keyboard()
+                "❌ اطلاعات ویرایش پیدا نشد.",
+                reply_markup=main_keyboard()
             )
             return
         
-        name = parts[0]
-        amount = parse_amount(parts[1])
-        category = parts[2]
+        message_text = normalize_digits(message.strip())
         
-        if not name:
-            await update.message.reply_text(
-                "❌ نام هزینه نمی‌تواند خالی باشد.",
-                reply_markup=back_keyboard()
-            )
-            return
+        # ------------------------------------------
+        # حالت کامل: نام|مبلغ|دسته‌بندی
+        # ------------------------------------------
+        if "|" in message_text:
+            parts = [part.strip() for part in message_text.split("|")]
+            
+            if len(parts) != 3:
+                await update.message.reply_text(
+                    "❌ فرمت اشتباه است.\n\n"
+                    "فرمت صحیح:\n"
+                    "نام|مبلغ|دسته‌بندی\n\n"
+                    "مثال:\n"
+                    "صبحانه|45000|🍔 غذا",
+                    reply_markup=back_keyboard()
+                )
+                return
+            
+            name = parts[0]
+            amount = parse_amount(parts[1])
+            category = parts[2]
+            
+            if not name:
+                await update.message.reply_text(
+                    "❌ نام هزینه نمی‌تواند خالی باشد.",
+                    reply_markup=back_keyboard()
+                )
+                return
+            
+            if amount is None:
+                await update.message.reply_text(
+                    "❌ مبلغ نامعتبر است.",
+                    reply_markup=back_keyboard()
+                )
+                return
+            
+            categories = get_categories()
+            category_names = [name for _, name in categories]
+            
+            if category not in category_names:
+                await update.message.reply_text(
+                    f"❌ دسته‌بندی «{category}» وجود ندارد.",
+                    reply_markup=back_keyboard()
+                )
+                return
         
-        if amount is None:
-            await update.message.reply_text(
-                "❌ مبلغ نامعتبر است.",
-                reply_markup=back_keyboard()
-            )
-            return
-        
-        categories = get_categories()
-        category_names = [name for _, name in categories]
-        
-        if category not in category_names:
-            await update.message.reply_text(
-                f"❌ دسته‌بندی «{category}» وجود ندارد.",
-                reply_markup=back_keyboard()
-            )
-            return
-    
-    # ------------------------------------------
-    # حالت فقط مبلغ
-    # ------------------------------------------
-    else:
-        amount = parse_amount(message_text)
-        
-        if amount is None:
-            await update.message.reply_text(
-                "❌ مبلغ باید یک عدد مثبت باشد.\n\n"
-                "مثال:\n"
-                "75000\n\n"
-                "یا برای تغییر کامل:\n"
-                "صبحانه|45000|🍔 غذا",
-                reply_markup=back_keyboard()
-            )
-            return
+        # ------------------------------------------
+        # حالت فقط مبلغ
+        # ------------------------------------------
+        else:
+            amount = parse_amount(message_text)
+            
+            if amount is None:
+                await update.message.reply_text(
+                    "❌ مبلغ باید یک عدد مثبت باشد.\n\n"
+                    "مثال:\n"
+                    "75000\n\n"
+                    "یا برای تغییر کامل:\n"
+                    "صبحانه|45000|🍔 غذا",
+                    reply_markup=back_keyboard()
+                )
+                return
         
         # دریافت اطلاعات فعلی
         response = (
