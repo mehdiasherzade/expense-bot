@@ -3162,7 +3162,35 @@ async def reports_callback(update, context):
             int(row["amount"])
             for row in month_rows
         )
+                # تفکیک هزینه‌ها بر اساس دسته‌بندی
+        category_totals = {}
 
+        for row in rows:
+            category = row.get("category") or "📦 سایر"
+            amount = int(row["amount"])
+
+            if category not in category_totals:
+                category_totals[category] = 0
+
+            category_totals[category] += amount
+
+        category_text = ""
+
+        if category_totals:
+            category_text = "\n━━━━━━━━━━━━\n\n"
+            category_text += "📂 هزینه‌ها بر اساس دسته‌بندی\n\n"
+
+            sorted_categories = sorted(
+                category_totals.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+
+            for category, amount in sorted_categories:
+                category_text += (
+                    f"{category}\n"
+                    f"💰 {amount:,} تومان\n\n"
+                )
         today_jalali = to_jalali(today)
 
         text = "📊 خلاصه مالی\n\n"
@@ -3186,6 +3214,8 @@ async def reports_callback(update, context):
             f"🧾 {month_count} هزینه - "
             f"💰 {month_total:,} تومان"
         )
+
+        text += category_text
 
         buttons = [[
             InlineKeyboardButton(
