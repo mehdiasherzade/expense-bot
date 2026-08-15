@@ -2199,7 +2199,7 @@ async def quick_delete_confirm_callback(update, context):
     deleted = delete_quick_expense(user_id, quick_id)
 
     if deleted:
-    context.user_data.clear()
+        context.user_data.clear()
 
     await query.edit_message_text(
         "✅ هزینه سریع حذف شد.",
