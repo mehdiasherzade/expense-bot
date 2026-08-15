@@ -3210,25 +3210,24 @@ async def reports_callback(update, context):
 
         text = "📊 خلاصه مالی\n\n"
 
-        text += f"💰 مجموع کل: {total:,} تومان\n"
-        text += f"🧾 تعداد کل: {count} هزینه\n"
-        text += f"📊 میانگین هر هزینه: {average:,} تومان\n"
-        text += f"🔺 بیشترین هزینه: {maximum:,} تومان\n"
-        text += f"🔻 کمترین هزینه: {minimum:,} تومان\n\n"
+        text += "💰 وضعیت کلی\n"
+        text += f"مجموع هزینه‌ها: {total:,} تومان\n"
+        text += f"تعداد هزینه‌ها: {count} مورد\n"
+        text += f"میانگین هر هزینه: {average:,} تومان\n"
+        text += f"🔺 بیشترین: {maximum:,} تومان\n"
+        text += f"🔻 کمترین: {minimum:,} تومان\n\n"
 
         text += "━━━━━━━━━━━━\n"
 
-        text += (
-            f"📅 امروز ({today_jalali})\n"
-            f"🧾 {today_count} هزینه - "
-            f"💰 {today_total:,} تومان\n\n"
-        )
+        text += "━━━━━━━━━━━━\n\n"
 
-        text += (
-            "📅 این ماه\n"
-            f"🧾 {month_count} هزینه - "
-            f"💰 {month_total:,} تومان"
-        )
+        text += f"📅 امروز — {today_jalali}\n"
+        text += f"🧾 {today_count} هزینه\n"
+        text += f"💰 {today_total:,} تومان\n\n"
+
+        text += "📅 این ماه\n"
+        text += f"🧾 {month_count} هزینه\n"
+        text += f"💰 {month_total:,} تومان"
 
         text += category_text
 
