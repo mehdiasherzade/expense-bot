@@ -1259,7 +1259,15 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
     # مرتب‌سازی دسته‌بندی‌ها بر اساس مبلغ (بیشترین اول)
     category_rows_sorted = sorted(category_rows, key=lambda x: x[1], reverse=True)
     
-    text = f"📅 گزارش بر اساس تاریخ\n\n"
+    # عنوان هوشمند گزارش
+    today = datetime.now(TEHRAN_TZ).strftime("%Y-%m-%d")
+
+    if start_date == today and end_date == today:
+        report_title = "📊 گزارش امروز"
+    else:
+        report_title = "📅 گزارش بر اساس تاریخ"
+
+    text = f"{report_title}\n\n"
     text += f"📅 از {start_jalali}\n"
     text += f"📅 تا {end_jalali}\n\n"
     text += "━━━━━━━━━━━━\n"
@@ -2176,8 +2184,21 @@ async def quick_delete_callback(update, context):
 # ==========================================
 # تابع خروجی اکسل
 # ==========================================
+async def export_excel_callback(update, context):
+    """خروجی اکسل از طریق دکمه گزارش‌ها"""
+    query = update.callback_query
+    await query.answer()
 
-async def export_excel(update, context):
+    user_id = query.from_user.id
+
+    if not is_allowed(user_id):
+        return
+
+    # تابع اصلی خروجی اکسل را اجرا می‌کنیم
+    await export_excel(update, context)
+
+
+async def export_excel(update, context, from_callback=False):
     user_id = update.effective_user.id
 
     if not is_allowed(user_id):
@@ -2757,17 +2778,42 @@ async def export_excel(update, context):
         # ==========================================
         # ارسال فایل
         # ==========================================
-        await update.message.reply_document(
-            document=output,
-            filename=filename,
-            caption=(
-                f"📊 گزارش کامل هزینه‌های ماه {jalali_month}\n\n"
-                f"🧾 تعداد: {count} مورد\n"
-                f"💰 مجموع: {total:,} تومان\n"
-                f"📊 میانگین: {average:,} تومان"
-            ),
-            reply_markup=main_keyboard()
-        )
+caption = (
+    f"📊 گزارش کامل هزینه‌های ماه {jalali_month}\n\n"
+    f"🧾 تعداد: {count} مورد\n"
+    f"💰 مجموع: {total:,} تومان\n"
+    f"📊 میانگین: {average:,} تومان"
+)
+
+if from_callback:
+    await update.callback_query.message.reply_document(
+        document=output,
+        filename=filename,
+        caption=caption,
+        reply_markup=main_keyboard()
+    )
+async def export_excel_callback(update, context):
+    """خروجی اکسل از طریق دکمه گزارش‌ها"""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+
+    if not is_allowed(user_id):
+        return
+
+    await export_excel(
+        update,
+        context,
+        from_callback=True
+    )
+else:
+    await update.message.reply_document(
+        document=output,
+        filename=filename,
+        caption=caption,
+        reply_markup=main_keyboard()
+    )
 
         logger.info(
             f"Export Excel successful | "
@@ -3899,6 +3945,12 @@ def main():
     keyword_delete_confirm_callback,
     pattern=r"^keyword_delete_confirm:\d+$"
     ))
+    app.add_handler(
+    CallbackQueryHandler(
+        export_excel_callback,
+        pattern=r"^report_excel$"
+    )
+    )
     # ==========================================
     # مدیریت هزینه‌های سریع
     # ==========================================
