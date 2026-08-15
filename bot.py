@@ -3165,7 +3165,7 @@ async def reports_callback(update, context):
 
         today_jalali = to_jalali(today)
 
-        text = "📊 آمار کلی هزینه‌ها\n\n"
+        text = "📊 خلاصه مالی\n\n"
 
         text += f"💰 مجموع کل: {total:,} تومان\n"
         text += f"🧾 تعداد کل: {count} هزینه\n"
@@ -3250,7 +3250,7 @@ async def reports_callback(update, context):
         ]
 
         await query.edit_message_text(
-            "📈 گزارش پیشرفته\n\n"
+            "📅 گزارش بر اساس تاریخ\n\n"
             "یک بازه زمانی را انتخاب کن:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
@@ -3704,7 +3704,7 @@ async def handle_message(update, context):
     )
 
 async def reports_menu_callback(update, context):
-    """بازگشت به منوی گزارش‌ها"""
+    """منوی اصلی گزارش‌ها"""
 
     query = update.callback_query
     await query.answer()
@@ -3719,33 +3719,27 @@ async def reports_menu_callback(update, context):
     buttons = [
         [
             InlineKeyboardButton(
-                "📊 گزارش امروز",
-                callback_data="report_today"
-            ),
-            InlineKeyboardButton(
-                "📅 گزارش تاریخ",
-                callback_data="report_date"
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                "📊 گزارش ماه",
-                callback_data="report_month"
-            ),
-            InlineKeyboardButton(
-                "📈 گزارش پیشرفته",
-                callback_data="report_advanced"
-            ),
-        ],
-        [
-            InlineKeyboardButton(
-                "📋 هزینه‌های اخیر",
-                callback_data="report_recent"
-            ),
-            InlineKeyboardButton(
-                "📊 آمار کلی",
+                "📊 خلاصه مالی",
                 callback_data="report_stats"
-            ),
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "📅 گزارش بر اساس تاریخ",
+                callback_data="report_advanced"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "📋 لیست هزینه‌ها",
+                callback_data="report_recent"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "📥 خروجی اکسل",
+                callback_data="report_month"
+            )
         ],
         [
             InlineKeyboardButton(
