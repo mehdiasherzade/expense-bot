@@ -3216,8 +3216,7 @@ async def reports_callback(update, context):
         text += f"میانگین هر هزینه: {average:,} تومان\n"
         text += f"🔺 بیشترین: {maximum:,} تومان\n"
         text += f"🔻 کمترین: {minimum:,} تومان\n\n"
-
-        text += "━━━━━━━━━━━━\n"
+        
 
         text += "━━━━━━━━━━━━\n\n"
 
@@ -3227,7 +3226,7 @@ async def reports_callback(update, context):
 
         text += "📅 این ماه\n"
         text += f"🧾 {month_count} هزینه\n"
-        text += f"💰 {month_total:,} تومان"
+        text += f"💰 {month_total:,} تومان\n"
 
         text += category_text
 
