@@ -2385,10 +2385,7 @@ async def quick_edit_select_callback(update, context):
         f"📂 دسته‌بندی: {item['category']}\n\n"
         "مثال:\n"
         "75000\n\n"
-        "برای تغییر نام و دسته‌بندی:\n"
-        "نام جدید|مبلغ جدید|دسته‌بندی جدید\n\n"
-        "مثال:\n"
-        "صبحانه|45000|🍔 غذا",
+        "🔹 فقط عدد وارد کن (نام و دسته‌بندی تغییر نمی‌کنند).",
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
