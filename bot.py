@@ -2088,7 +2088,7 @@ async def settings_menu_callback(update, context):
 # توابع مدیریت هزینه‌های سریع
 # ==========================================
 async def quick_add_callback(update, context):
-    """افزودن هزینه سریع جدید - روش خیلی ساده"""
+    """شروع افزودن هزینه سریع جدید"""
     query = update.callback_query
     await query.answer()
 
@@ -2096,27 +2096,40 @@ async def quick_add_callback(update, context):
     if not is_allowed(user_id):
         return
 
-    # دریافت دسته‌بندی‌ها
+    # پاک کردن تمام stateهای قبلی
+    context.user_data.clear()
+    context.user_data["quick_add_step"] = "category"
+
     categories = get_categories()
-    
-    # دکمه‌های دسته‌بندی
+
     category_buttons = []
     row = []
+
     for cat_id, cat_name in categories:
-        row.append(InlineKeyboardButton(cat_name, callback_data=f"quick_add_cat_{cat_id}"))
+        row.append(
+            InlineKeyboardButton(
+                cat_name,
+                callback_data=f"quick_add_cat_{cat_id}"
+            )
+        )
+
         if len(row) == 2:
             category_buttons.append(row)
             row = []
+
     if row:
         category_buttons.append(row)
 
-    category_buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")])
-
-    context.user_data["quick_add_step"] = "category"
+    category_buttons.append([
+        InlineKeyboardButton(
+            "🔙 بازگشت",
+            callback_data="quick_manage"
+        )
+    ])
 
     await query.edit_message_text(
-        "➕ **افزودن هزینه سریع جدید**\n\n"
-        "۱. دسته‌بندی رو انتخاب کن:",
+        "➕ افزودن هزینه سریع جدید\n\n"
+        "۱. دسته‌بندی را انتخاب کن:",
         reply_markup=InlineKeyboardMarkup(category_buttons)
     )
 
@@ -2129,11 +2142,16 @@ async def quick_add_category_callback(update, context):
     if not is_allowed(user_id):
         return
 
-    # دریافت دسته‌بندی انتخاب شده
-    cat_id = int(query.data.replace("quick_add_cat_", ""))
+    try:
+        cat_id = int(query.data.replace("quick_add_cat_", ""))
+    except ValueError:
+        await query.edit_message_text("❌ دسته‌بندی نامعتبر است.")
+        return
+
     categories = get_categories()
-    
+
     category_name = None
+
     for cid, name in categories:
         if cid == cat_id:
             category_name = name
@@ -2143,17 +2161,26 @@ async def quick_add_category_callback(update, context):
         await query.edit_message_text("❌ دسته‌بندی پیدا نشد.")
         return
 
+    # فقط state مربوط به هزینه سریع را نگه می‌داریم
+    context.user_data.clear()
     context.user_data["quick_add_category"] = category_name
     context.user_data["waiting_quick_add"] = True
 
     await query.edit_message_text(
-        f"➕ **افزودن هزینه سریع**\n\n"
+        f"➕ افزودن هزینه سریع\n\n"
         f"📂 دسته‌بندی: {category_name}\n\n"
-        "۲. مبلغ رو وارد کن (فقط عدد):\n\n"
-        "مثال: `85000`\n\n"
-        "یا با توضیح: `85000 ناهار`",
+        "۲. مبلغ را وارد کن.\n\n"
+        "مثال:\n"
+        "85000\n\n"
+        "یا همراه با نام:\n"
+        "85000 ناهار",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")]
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="quick_manage"
+                )
+            ]
         ])
     )
 async def quick_delete_confirm_callback(update, context):
@@ -2172,12 +2199,31 @@ async def quick_delete_confirm_callback(update, context):
     deleted = delete_quick_expense(user_id, quick_id)
 
     if deleted:
-        await query.edit_message_text(
-            "✅ **هزینه سریع با موفقیت حذف شد!**",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 بازگشت به مدیریت", callback_data="quick_manage")]
-            ])
-        )
+    context.user_data.clear()
+
+    await query.edit_message_text(
+        "✅ هزینه سریع حذف شد.",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "⚙️ مدیریت هزینه‌های سریع",
+                    callback_data="quick_manage"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🧾 هزینه‌های سریع",
+                    callback_data="quick_menu"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 منوی اصلی",
+                    callback_data="back_menu"
+                )
+            ]
+        ])
+    )
     else:
         await query.edit_message_text(
             "❌ خطا در حذف هزینه سریع.",
@@ -2204,10 +2250,12 @@ async def quick_edit_select_callback(update, context):
         await query.edit_message_text("❌ هزینه سریع پیدا نشد.")
         return
 
-    item = response.data[0]
+    context.user_data.clear()
+
     context.user_data["quick_edit_id"] = quick_id
     context.user_data["quick_edit_name"] = item["name"]
-    context.user_data["waiting_quick_edit"] = True
+    context.user_data["quick_edit_category"] = item["category"]
+    context.user_data["waiting_quick_edit"] = Truee
 
     await query.edit_message_text(
         f"✏️ **ویرایش {item['name']}**\n\n"
@@ -3880,106 +3928,184 @@ async def handle_message(update, context):
     # افزودن هزینه سریع جدید (روش خیلی ساده)
     # ==========================================
     if context.user_data.get("waiting_quick_add"):
-        category = context.user_data.get("quick_add_category", "📦 سایر")
-        message_text = message.strip()
-        
-        # بررسی فرمت: "مبلغ توضیح" یا فقط "مبلغ"
-        parsed = parse_expense_text(message_text)
-        
-        if parsed:
-            amount, name = parsed
-        else:
-            # فقط مبلغ وارد شده
-            try:
-                amount = int(message_text)
-                # اگر نامی وارد نشده، از نام دسته‌بندی استفاده کن
-                name = category
-            except ValueError:
-                await update.message.reply_text(
-                    "❌ فقط عدد وارد کن!\n\n"
-                    "مثال: `85000`\n"
-                    "یا: `85000 ناهار`",
-                    reply_markup=back_keyboard()
-                )
-                return
+    category = context.user_data.get(
+        "quick_add_category",
+        "📦 سایر"
+    )
 
-        # ذخیره در دیتابیس هزینه‌های سریع
-        add_quick_expense(user_id, name, amount, category)
+    message_text = normalize_digits(message.strip())
 
-        context.user_data.clear()
-        await update.message.reply_text(
-            f"✅ **هزینه سریع جدید اضافه شد!**\n\n"
-            f"📝 {name}\n"
-            f"💰 {amount:,} تومان\n"
-            f"📂 {category}\n\n"
-            "می‌توانی از منوی هزینه‌های سریع استفاده کنی.",
-            reply_markup=main_keyboard()
-        )
-        return
+    # حالت:
+    # 85000 ناهار
+    parsed = parse_expense_text(message_text)
 
+    if parsed:
+        amount, name = parsed
+
+    else:
+        # حالت:
+        # 85000
+        amount = parse_amount(message_text)
+
+        if amount is None:
+            await update.message.reply_text(
+                "❌ مبلغ نامعتبر است.\n\n"
+                "مثال:\n"
+                "85000\n\n"
+                "یا:\n"
+                "85000 ناهار",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        name = category
+
+    add_quick_expense(
+        user_id,
+        name,
+        amount,
+        category
+    )
+
+    context.user_data.clear()
+
+    await update.message.reply_text(
+        "✅ هزینه سریع با موفقیت اضافه شد!\n\n"
+        f"📝 {name}\n"
+        f"💰 {amount:,} تومان\n"
+        f"📂 {category}",
+        reply_markup=main_keyboard()
+    )
+
+    return
     # ==========================================
     # ویرایش هزینه سریع
     # ==========================================
     if context.user_data.get("waiting_quick_edit"):
-        quick_id = context.user_data.get("quick_edit_id")
-        old_name = context.user_data.get("quick_edit_name")
-        
-        if not quick_id:
-            await update.message.reply_text("❌ خطا در ویرایش.", reply_markup=main_keyboard())
+    quick_id = context.user_data.get("quick_edit_id")
+
+    if not quick_id:
+        context.user_data.clear()
+
+        await update.message.reply_text(
+            "❌ اطلاعات ویرایش پیدا نشد.",
+            reply_markup=main_keyboard()
+        )
+        return
+
+    message = normalize_digits(message.strip())
+
+    # -------------------------------
+    # حالت کامل:
+    # نام|مبلغ|دسته‌بندی
+    # -------------------------------
+    if "|" in message:
+        parts = [part.strip() for part in message.split("|")]
+
+        if len(parts) != 3:
+            await update.message.reply_text(
+                "❌ فرمت اشتباه!\n\n"
+                "فرمت درست:\n"
+                "نام|مبلغ|دسته‌بندی\n\n"
+                "مثال:\n"
+                "صبحانه|45000|🍔 غذا",
+                reply_markup=back_keyboard()
+            )
             return
 
-        if '|' in message:
-            parts = message.split('|')
-            if len(parts) != 3:
-                await update.message.reply_text(
-                    "❌ فرمت اشتباه!\n\n"
-                    "فرمت درست:\n"
-                    "`نام|مبلغ|دسته‌بندی`\n\n"
-                    "مثال:\n"
-                    "`صبحانه|45000|🍔 غذا`",
-                    reply_markup=back_keyboard()
-                )
-                return
-            name = parts[0].strip()
-            try:
-                amount = int(parts[1].strip())
-            except ValueError:
-                await update.message.reply_text("❌ مبلغ باید عدد باشد.", reply_markup=back_keyboard())
-                return
-            category = parts[2].strip()
-            categories = [cat for _, cat in get_categories()]
-            if category not in categories:
-                await update.message.reply_text(
-                    f"❌ دسته‌بندی «{category}» وجود ندارد.",
-                    reply_markup=back_keyboard()
-                )
-                return
-        else:
-            try:
-                amount = int(message.strip())
-            except ValueError:
-                await update.message.reply_text("❌ مبلغ باید عدد باشد.", reply_markup=back_keyboard())
-                return
-            response = supabase.table("quick_expenses").select("*").eq("id", quick_id).eq("user_id", user_id).execute()
-            if not response.data:
-                await update.message.reply_text("❌ هزینه سریع پیدا نشد.", reply_markup=main_keyboard())
-                return
-            item = response.data[0]
-            name = item["name"]
-            category = item["category"]
+        name = parts[0]
+        amount = parse_amount(parts[1])
+        category = parts[2]
 
-        updated = update_quick_expense(user_id, quick_id, name, amount, category)
-        context.user_data.clear()
-        if updated:
+        if not name:
             await update.message.reply_text(
-                f"✅ **هزینه {name} ویرایش شد!**\n\n"
-                f"💰 مبلغ جدید: {amount:,} تومان\n"
-                f"📂 {category}",
+                "❌ نام هزینه نمی‌تواند خالی باشد.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        if amount is None:
+            await update.message.reply_text(
+                "❌ مبلغ نامعتبر است.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        categories = [
+            cat_name
+            for _, cat_name in get_categories()
+        ]
+
+        if category not in categories:
+            await update.message.reply_text(
+                f"❌ دسته‌بندی «{category}» وجود ندارد.",
+                reply_markup=back_keyboard()
+            )
+            return
+
+    # -------------------------------
+    # فقط مبلغ
+    # -------------------------------
+    else:
+        amount = parse_amount(message)
+
+        if amount is None:
+            await update.message.reply_text(
+                "❌ مبلغ باید یک عدد مثبت باشد.\n\n"
+                "مثال:\n"
+                "75000",
+                reply_markup=back_keyboard()
+            )
+            return
+
+        response = (
+            supabase
+            .table("quick_expenses")
+            .select("*")
+            .eq("id", quick_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+
+        if not response.data:
+            context.user_data.clear()
+
+            await update.message.reply_text(
+                "❌ هزینه سریع پیدا نشد.",
                 reply_markup=main_keyboard()
             )
-        else:
-            await update.message.reply_text("❌ خطا در ویرایش.", reply_markup=main_keyboard())
-        return
+            return
+
+        item = response.data[0]
+
+        name = item["name"]
+        category = item["category"]
+
+    updated = update_quick_expense(
+        user_id,
+        quick_id,
+        name,
+        amount,
+        category
+    )
+
+    context.user_data.clear()
+
+    if updated:
+        await update.message.reply_text(
+            "✅ هزینه سریع ویرایش شد!\n\n"
+            f"📝 {name}\n"
+            f"💰 {amount:,} تومان\n"
+            f"📂 {category}",
+            reply_markup=main_keyboard()
+        )
+    else:
+        await update.message.reply_text(
+            "❌ ویرایش هزینه سریع انجام نشد.",
+            reply_markup=main_keyboard()
+        )
+
+    return
 
     # ==========================================
     # ثبت سریع هزینه (بدون دسته)
