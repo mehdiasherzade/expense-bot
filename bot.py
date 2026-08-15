@@ -558,14 +558,14 @@ async def quick_expenses_menu(update, context):
         "یکی از گزینه‌های زیر رو انتخاب کن تا هزینه ثبت بشه:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    async def quick_menu_callback(update, context):
-        """بازگشت به منوی هزینه‌های سریع"""
-        query = update.callback_query
-        await query.answer()
+async def quick_menu_callback(update, context):
+    """بازگشت به منوی هزینه‌های سریع"""
+    query = update.callback_query
+    await query.answer()
 
-        user_id = query.from_user.id
-        if not is_allowed(user_id):
-            return
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
 
     # دریافت هزینه‌های سریع از دیتابیس
     response = (
@@ -580,10 +580,9 @@ async def quick_expenses_menu(update, context):
     quick_expenses = response.data or []
 
     keyboard = []
-
-    # ساخت دکمه‌ها از اطلاعات واقعی دیتابیس
     row = []
 
+    # ساخت دکمه‌ها از اطلاعات واقعی دیتابیس
     for item in quick_expenses:
         button = InlineKeyboardButton(
             item["name"],
