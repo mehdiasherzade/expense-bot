@@ -2821,22 +2821,22 @@ async def export_excel(update, context, from_callback=False):
         )
 
     except Exception as e:
-    logger.exception(
-        f"خطا در خروجی اکسل برای user={user_id}"
-    )
-
-    error_text = f"❌ خطا در ایجاد فایل اکسل:\n\n{str(e)}"
-
-    if from_callback:
-        await update.callback_query.message.reply_text(
-            error_text,
-            reply_markup=main_keyboard()
+        logger.exception(
+            f"خطا در خروجی اکسل برای user={user_id}"
         )
-    else:
-        await update.message.reply_text(
-            error_text,
-            reply_markup=main_keyboard()
-        )
+
+        error_text = f"❌ خطا در ایجاد فایل اکسل:\n\n{str(e)}"
+
+        if from_callback:
+            await update.callback_query.message.reply_text(
+                error_text,
+                reply_markup=main_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                error_text,
+                reply_markup=main_keyboard()
+            )
 # ==========================================
 # هندلر اصلی پیام‌ها
 # ==========================================
