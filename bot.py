@@ -3393,7 +3393,7 @@ async def handle_message(update, context):
     if message == "🔙 بازگشت":
         await go_back(update, context)
         return
-        # ==========================================
+    # ==========================================
     # ویرایش کلمه کلیدی
     # ==========================================
     if context.user_data.get("keyword_edit_id"):
@@ -3402,51 +3402,51 @@ async def handle_message(update, context):
         if not message:
             return
 
-    # پیدا کردن دسته‌بندی کلمه فعلی
-    keyword_info = (
-        supabase
-        .table("category_keywords")
-        .select("category_id")
-        .eq("id", keyword_id)
-        .single()
-        .execute()
-    )
-
-    category_id = keyword_info.data["category_id"]
-
-    # بررسی تکراری نبودن کلمه در همان دسته
-    duplicate_check = (
-        supabase
-        .table("category_keywords")
-        .select("id")
-        .eq("keyword", message)
-        .eq("category_id", category_id)
-        .neq("id", keyword_id)
-        .execute()
-    )
-
-    if duplicate_check.data:
-        await update.message.reply_text(
-            "❌ این کلمه قبلاً برای این دسته ثبت شده."
+        # پیدا کردن دسته‌بندی کلمه فعلی
+        keyword_info = (
+            supabase
+            .table("category_keywords")
+            .select("category_id")
+            .eq("id", keyword_id)
+            .single()
+            .execute()
         )
-        return
 
-    # انجام ویرایش
-    response = (
-        supabase
-        .table("category_keywords")
-        .update({"keyword": message})
-        .eq("id", keyword_id)
-        .execute()
-    )
+        category_id = keyword_info.data["category_id"]
+
+        # بررسی تکراری نبودن کلمه در همان دسته
+        duplicate_check = (
+            supabase
+            .table("category_keywords")
+            .select("id")
+            .eq("keyword", message)
+            .eq("category_id", category_id)
+            .neq("id", keyword_id)
+            .execute()
+        )
+
+        if duplicate_check.data:
+            await update.message.reply_text(
+                "❌ این کلمه قبلاً برای این دسته ثبت شده."
+            )
+            return
+
+        # انجام ویرایش
+        response = (
+            supabase
+            .table("category_keywords")
+            .update({"keyword": message})
+            .eq("id", keyword_id)
+            .execute()
+        )
 
         if response.data:
             context.user_data.clear()
-            
+
             await update.message.reply_text(
                 f"✅ کلمه به «{message}» تغییر کرد."
             )
-            
+
             categories = get_categories()
 
             text = "🔑 مدیریت کلمات دسته‌بندی\n\n"
