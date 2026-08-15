@@ -1188,10 +1188,10 @@ async def advanced_quick_callback(update, context):
     # هفته جاری: شنبه تا امروز
         days_since_saturday = (today.weekday() + 2) % 7
 
-    start_of_week = today - timedelta(days=days_since_saturday)
+        start_of_week = today - timedelta(days=days_since_saturday)
 
-    start_date = start_of_week.strftime("%Y-%m-%d")
-    end_date = today.strftime("%Y-%m-%d")
+        start_date = start_of_week.strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
 
     elif action == "adv_week":
         # هفته گذشته: شنبه تا جمعه
