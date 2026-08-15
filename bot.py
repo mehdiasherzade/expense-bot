@@ -1665,10 +1665,56 @@ async def keyword_edit_callback(update, context):
     if not is_allowed(user_id):
         return
 
+    categories = get_categories()
+
+    if not categories:
+        await query.edit_message_text(
+            "✏️ هیچ دسته‌بندی‌ای وجود ندارد.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(
+                    "🔙 بازگشت",
+                    callback_data="manage_keywords"
+                )]
+            ])
+        )
+        return
+
+    buttons = []
+
+    for category_id, name in categories:
+        buttons.append([
+            InlineKeyboardButton(
+                name,
+                callback_data=f"keyword_edit_category:{category_id}"
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 بازگشت",
+            callback_data="manage_keywords"
+        )
+    ])
+
+    await query.edit_message_text(
+        "✏️ دسته‌بندی موردنظر برای ویرایش را انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+async def keyword_edit_category_callback(update, context):
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    if not is_allowed(user_id):
+        return
+
+    category_id = int(query.data.split(":")[1])
+
     response = (
         supabase
         .table("category_keywords")
         .select("id, keyword")
+        .eq("category_id", category_id)
         .order("id")
         .execute()
     )
@@ -1677,9 +1723,12 @@ async def keyword_edit_callback(update, context):
 
     if not keywords:
         await query.edit_message_text(
-            "✏️ کلمه‌ای برای ویرایش وجود ندارد.",
+            "✏️ برای این دسته کلمه‌ای وجود ندارد.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔙 بازگشت", callback_data="manage_keywords")]
+                [InlineKeyboardButton(
+                    "🔙 بازگشت به دسته‌بندی‌ها",
+                    callback_data="keyword_edit"
+                )]
             ])
         )
         return
@@ -1695,7 +1744,10 @@ async def keyword_edit_callback(update, context):
         ])
 
     buttons.append([
-        InlineKeyboardButton("🔙 بازگشت", callback_data="manage_keywords")
+        InlineKeyboardButton(
+            "🔙 بازگشت به دسته‌بندی‌ها",
+            callback_data="keyword_edit"
+        )
     ])
 
     await query.edit_message_text(
