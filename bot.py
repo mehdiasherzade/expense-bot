@@ -1259,7 +1259,7 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
     # مرتب‌سازی دسته‌بندی‌ها بر اساس مبلغ (بیشترین اول)
     category_rows_sorted = sorted(category_rows, key=lambda x: x[1], reverse=True)
     
-    text = f"📈 گزارش پیشرفته\n\n"
+    text = f"📅 گزارش بر اساس تاریخ\n\n"
     text += f"📅 از {start_jalali}\n"
     text += f"📅 تا {end_jalali}\n\n"
     text += "━━━━━━━━━━━━\n"
@@ -1286,7 +1286,7 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
     context.user_data.clear()
     
     # دکمه بازگشت
-    buttons = [[InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_menu")]]
+    buttons = [[InlineKeyboardButton("🔙 بازگشت به گزارش‌ها", callback_data="reports_menu")]]
     
     if from_callback and update.callback_query:
         await update.callback_query.edit_message_text(
@@ -3778,12 +3778,6 @@ async def reports_menu_callback(update, context):
             InlineKeyboardButton(
                 "📋 لیست هزینه‌ها",
                 callback_data="report_recent"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "📥 خروجی اکسل",
-                callback_data="report_month"
             )
         ],
         [
