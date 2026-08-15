@@ -558,8 +558,7 @@ async def quick_expenses_menu(update, context):
         "یکی از گزینه‌های زیر رو انتخاب کن تا هزینه ثبت بشه:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-
-async def quick_menu_callback(update, context):
+    async def quick_menu_callback(update, context):
     """بازگشت به منوی هزینه‌های سریع"""
     query = update.callback_query
     await query.answer()
@@ -568,29 +567,72 @@ async def quick_menu_callback(update, context):
     if not is_allowed(user_id):
         return
 
-    quick_items = [
-        ["🍔 ناهار", "🚕 تاکسی", "☕ کافه"],
-        ["🛒 خرید", "💳 قبض", "🏠 اجاره"],
-    ]
+    # دریافت هزینه‌های سریع از دیتابیس
+    response = (
+        supabase
+        .table("quick_expenses")
+        .select("id, name, amount, category")
+        .eq("user_id", user_id)
+        .order("id")
+        .execute()
+    )
+
+    quick_expenses = response.data or []
 
     keyboard = []
-    for row in quick_items:
-        keyboard.append([InlineKeyboardButton(item, callback_data=f"quick_{item}") for item in row])
 
-    keyboard.append([InlineKeyboardButton("⚙️ مدیریت هزینه‌های سریع", callback_data="quick_manage")])
-    keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")])
+    # ساخت دکمه‌ها از اطلاعات واقعی دیتابیس
+    row = []
+
+    for item in quick_expenses:
+        button = InlineKeyboardButton(
+            item["name"],
+            callback_data=f"quick_{item['id']}"
+        )
+
+        row.append(button)
+
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+
+    if row:
+        keyboard.append(row)
+
+    keyboard.append([
+        InlineKeyboardButton(
+            "⚙️ مدیریت هزینه‌های سریع",
+            callback_data="quick_manage"
+        )
+    ])
+
+    keyboard.append([
+        InlineKeyboardButton(
+            "🔙 بازگشت",
+            callback_data="back_menu"
+        )
+    ])
+
+    if quick_expenses:
+        text = "🧾 **هزینه‌های سریع**\n\n"
+        text += "یکی از گزینه‌های زیر رو انتخاب کن:\n\n"
+
+        for item in quick_expenses:
+            text += (
+                f"• {item['name']} — "
+                f"{item['amount']:,} تومان — "
+                f"{item['category']}\n"
+            )
+    else:
+        text = (
+            "🧾 **هزینه‌های سریع**\n\n"
+            "هنوز هیچ هزینه سریعی ثبت نشده است.\n\n"
+            "از «⚙️ مدیریت هزینه‌های سریع» می‌تونی "
+            "یک مورد جدید اضافه کنی."
+        )
 
     await query.edit_message_text(
-        "🧾 **هزینه‌های سریع**\n\n"
-        "یکی از گزینه‌های زیر رو انتخاب کن تا هزینه با مبلغ پیش‌فرض ثبت بشه:\n\n"
-        "🍔 ناهار: ۸۵,۰۰۰ تومان\n"
-        "🚕 تاکسی: ۵۰,۰۰۰ تومان\n"
-        "☕ کافه: ۳۵,۰۰۰ تومان\n"
-        "🛒 خرید: ۲۰۰,۰۰۰ تومان\n"
-        "💳 قبض: ۱۵۰,۰۰۰ تومان\n"
-        "🏠 اجاره: ۵۰۰,۰۰۰ تومان\n\n"
-        "یا می‌تونی با فرمت `مبلغ توضیح` ثبت کنی:\n"
-        "مثال: `85000 ناهار`",
+        text,
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
