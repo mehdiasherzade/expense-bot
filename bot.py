@@ -3417,15 +3417,44 @@ async def handle_message(update, context):
                 f"✅ کلمه به «{message}» تغییر کرد."
             )
             
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="🔑 مدیریت کلمات دسته‌بندی",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("➕ افزودن کلمه", callback_data="keyword_add")],
-                    [InlineKeyboardButton("✏️ ویرایش کلمه", callback_data="keyword_edit")],
-                    [InlineKeyboardButton("🗑️ حذف کلمه", callback_data="keyword_delete")],
-                    [InlineKeyboardButton("🔙 بازگشت", callback_data="settings_menu")]
-                ])
+            categories = get_categories()
+
+            text = "🔑 مدیریت کلمات دسته‌بندی\n\n"
+
+            for category_id, name in categories:
+                response = (
+                    supabase
+                    .table("category_keywords")
+                    .select("keyword")
+                    .eq("category_id", category_id)
+                    .execute()
+                )
+
+                keywords = [
+                    row["keyword"]
+                    for row in response.data
+                    if row.get("keyword")
+                ]
+
+                text += f"{name}\n"
+
+                if keywords:
+                    text += "  " + "، ".join(keywords) + "\n"
+                else:
+                    text += "  — کلمه‌ای ثبت نشده\n"
+
+                text += "\n"
+
+            buttons = [
+                [InlineKeyboardButton("➕ افزودن کلمه", callback_data="keyword_add")],
+                [InlineKeyboardButton("✏️ ویرایش کلمه", callback_data="keyword_edit")],
+                [InlineKeyboardButton("🗑️ حذف کلمه", callback_data="keyword_delete")],
+                [InlineKeyboardButton("🔙 بازگشت", callback_data="settings_menu")],
+            ]
+
+            await update.message.reply_text(
+                text,
+                reply_markup=InlineKeyboardMarkup(buttons)
             )
         else:
             await update.message.reply_text(
