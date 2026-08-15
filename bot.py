@@ -2023,9 +2023,14 @@ async def settings_menu_callback(update, context):
         return
     buttons = [
         [InlineKeyboardButton("🏷️ دسته‌بندی‌ها", callback_data="manage_categories")],
+        [InlineKeyboardButton("🔑 کلمات دسته‌بندی", callback_data="manage_keywords")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")],
     ]
-    await query.edit_message_text("⚙️ تنظیمات", reply_markup=InlineKeyboardMarkup(buttons))
+
+    await query.edit_message_text(
+        "⚙️ تنظیمات",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 
 # ==========================================
 # توابع مدیریت هزینه‌های سریع
