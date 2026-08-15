@@ -3442,24 +3442,17 @@ async def handle_message(update, context):
                 reply_markup=main_keyboard()
             )
 
-    except Exception as e:
-
-        logger.exception(
-            f"خطا در خروجی اکسل برای user={user_id}"
-        )
-
-        error_text = f"❌ خطا در ایجاد فایل اکسل:\n\n{str(e)}"
-
-        if from_callback:
-            await update.callback_query.message.reply_text(
-                error_text,
-                reply_markup=main_keyboard()
+        except Exception as e:
+            logger.exception(
+                f"خطا در افزودن کلمه کلیدی | user={user_id}"
             )
-        else:
+
             await update.message.reply_text(
-                error_text,
-                reply_markup=main_keyboard()
+                "❌ خطایی در افزودن کلمه کلیدی رخ داد.",
+                reply_markup=back_keyboard()
             )
+
+        return
     # ==========================================
     # مدیریت دسته‌بندی‌ها
     # ==========================================
