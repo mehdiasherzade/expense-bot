@@ -1832,7 +1832,6 @@ async def category_report_show_categories(
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
-
 async def show_category_report(
     update,
     context,
@@ -1842,229 +1841,80 @@ async def show_category_report(
     page=None
 ):
     """نمایش گزارش جزئیات یک دسته‌بندی"""
-
     user_id = update.effective_user.id
-
-    category_name = context.user_data.get(
-        "category_report_category"
-    )
-
+    category_name = context.user_data.get("category_report_category")
+    
     if not category_name:
-
-        text = (
-            "❌ دسته‌بندی گزارش مشخص نیست.\n\n"
-            "لطفاً دوباره گزارش را اجرا کن."
-        )
-
+        text = "❌ دسته‌بندی گزارش مشخص نیست.\nلطفاً دوباره گزارش را اجرا کن."
         if update.callback_query:
             await update.callback_query.edit_message_text(text)
         else:
-            await update.message.reply_text(
-                text,
-                reply_markup=main_keyboard()
-            )
-
+            await update.message.reply_text(text, reply_markup=main_keyboard())
         context.user_data.clear()
         return
-
-    rows = get_category_report_expenses(
-        user_id,
-        category_name,
-        start_date,
-        end_date
-    )
-
+        
+    rows = get_category_report_expenses(user_id, category_name, start_date, end_date)
+    
     # ذخیره اطلاعات برای صفحه‌بندی
     context.user_data["category_report_start"] = start_date
     context.user_data["category_report_end"] = end_date
     context.user_data["category_report_period"] = period_title
-
+    
     if page is None:
-        page = context.user_data.get(
-            "category_report_page",
-            0
-        )
-
+        page = context.user_data.get("category_report_page", 0)
     context.user_data["category_report_page"] = page
 
     # ==========================================
     # بدون هزینه
     # ==========================================
     if not rows:
-
         start_jalali = to_jalali(start_date)
         end_jalali = to_jalali(end_date)
-
         if start_date == end_date:
-
             date_text = start_jalali
-
         else:
-
-            date_text = (
-                f"{start_jalali} تا {end_jalali}"
-            )
-
+            date_text = f"{start_jalali} تا {end_jalali}"
+            
         text = (
             f"📂 {category_name}\n"
-            f"📅 {period_title}\n\n"
-            f"📅 {date_text}\n\n"
-            "❌ در این بازه برای این دسته "
-            "هیچ هزینه‌ای ثبت نشده."
+            f"📅 {period_title}\n"
+            f"📅 {date_text}\n"
+            "❌ در این بازه برای این دسته هیچ هزینه‌ای ثبت نشده."
         )
-
         buttons = [
-            [
-                InlineKeyboardButton(
-                    "🔙 انتخاب بازه",
-                    callback_data=(
-                        f"cat_report_cat_back"
-                    )
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔙 انتخاب دسته",
-                    callback_data="cat_report_back_category"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔙 بازگشت به گزارش‌ها",
-                    callback_data="reports_menu"
-                )
-            ]
+            [InlineKeyboardButton("🔙 انتخاب بازه", callback_data="cat_report_period_back")],
+            [InlineKeyboardButton("🔙 انتخاب دسته", callback_data="cat_report_back_category")],
+            [InlineKeyboardButton("🔙 بازگشت به گزارش‌ها", callback_data="reports_menu")]
         ]
-
-        # چون cat_report_cat_back در تابع اصلی نیاز به
-        # رسیدگی جداگانه دارد، مستقیم به انتخاب بازه می‌رویم.
-        buttons[0][0] = InlineKeyboardButton(
-            "🔙 انتخاب بازه",
-            callback_data="cat_report_period_back"
-        )
-
-        await category_report_edit_or_send(
-            update,
-            text,
-            InlineKeyboardMarkup(buttons)
-        )
-
+        await category_report_edit_or_send(update, text, InlineKeyboardMarkup(buttons))
         return
 
-        # ==========================================
-    # بازگشت به انتخاب بازه زمانی
     # ==========================================
-    if action == "cat_report_period_back":
-
-        category_name = context.user_data.get(
-            "category_report_category"
-        )
-
-        if not category_name:
-            await category_report_show_categories(
-                update,
-                context,
-                from_callback=True
-            )
-            return
-
-        buttons = [
-            [
-                InlineKeyboardButton(
-                    "📅 امروز",
-                    callback_data="cat_report_today"
-                ),
-                InlineKeyboardButton(
-                    "📅 این هفته",
-                    callback_data="cat_report_this_week"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "📅 هفته گذشته",
-                    callback_data="cat_report_last_week"
-                ),
-                InlineKeyboardButton(
-                    "📅 این ماه",
-                    callback_data="cat_report_this_month"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "📅 سه ماه اخیر",
-                    callback_data="cat_report_quarter"
-                ),
-                InlineKeyboardButton(
-                    "✏️ بازه دلخواه",
-                    callback_data="cat_report_manual"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔙 انتخاب دسته",
-                    callback_data="cat_report_back_category"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "🔙 بازگشت به گزارش‌ها",
-                    callback_data="reports_menu"
-                )
-            ]
-        ]
-
-        await query.edit_message_text(
-            f"📂 گزارش دسته‌بندی\n\n"
-            f"{category_name}\n\n"
-            "📅 بازه زمانی را انتخاب کن:",
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-
-        return
-    # ==========================================
-    # صفحه‌بندی
+    # صفحه‌بندی و نمایش هزینه‌ها
     # ==========================================
     limit = 5
-
     total_items = len(rows)
-
-    total_pages = (
-        total_items + limit - 1
-    ) // limit
+    total_pages = (total_items + limit - 1) // limit
 
     if page < 0:
         page = 0
-
     if page >= total_pages:
         page = total_pages - 1
-
+        
     context.user_data["category_report_page"] = page
-
     offset = page * limit
-
-    page_rows = rows[
-        offset:offset + limit
-    ]
-
-    total = sum(
-        row[1]
-        for row in rows
-    )
-
+    page_rows = rows[offset:offset + limit]
+    
+    total = sum(row[1] for row in rows)
     count = len(rows)
-
+    
     start_jalali = to_jalali(start_date)
     end_jalali = to_jalali(end_date)
-
+    
     if start_date == end_date:
-
         date_text = start_jalali
-
     else:
-
-        date_text = (
-            f"{start_jalali} تا {end_jalali}"
-        )
+        date_text = f"{start_jalali} تا {end_jalali}"
 
     # ==========================================
     # متن گزارش
@@ -2072,52 +1922,23 @@ async def show_category_report(
     text = (
         f"📂 {category_name}\n"
         f"📅 {period_title}\n"
-        f"📆 {date_text}\n\n"
+        f"📆 {date_text}\n"
         f"📄 صفحه {page + 1} از {total_pages}\n"
         f"💰 مجموع: {total:,} تومان\n"
         f"🧾 تعداد: {count} مورد\n"
-        "━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━\n"
     )
-
-    for display_number, (
-        expense_id,
-        amount,
-        description,
-        category,
-        created_at
-    ) in enumerate(
-        page_rows,
-        start=offset + 1
-    ):
-
-        expense_date = (
-            created_at[:10]
-            if created_at
-            else ""
-        )
-
-        expense_date_jalali = to_jalali(
-            expense_date
-        )
-
-        expense_time = (
-            created_at[11:16]
-            if created_at and len(created_at) >= 16
-            else ""
-        )
-
-        text += (
-            f"#{display_number}\n"
-            f"💰 {amount:,} تومان\n"
-            f"📝 {description}\n"
-            f"📅 {expense_date_jalali}"
-        )
-
+    
+    for display_number, (expense_id, amount, description, category, created_at) in enumerate(page_rows, start=offset + 1):
+        expense_date = created_at[:10] if created_at else ""
+        expense_date_jalali = to_jalali(expense_date)
+        expense_time = created_at[11:16] if created_at and len(created_at) >= 16 else ""
+        
+        text += f"#{display_number}\n💰 {amount:,} تومان\n📝 {description}\n📅 {expense_date_jalali}"
         if expense_time:
             text += f" | 🕐 {expense_time}"
-
-        text += "\n\n"
-
+        text += "\n"
+        
     text += (
         "━━━━━━━━━━━━\n"
         f"🧾 تعداد کل: {count} مورد\n"
@@ -2128,66 +1949,23 @@ async def show_category_report(
     # دکمه‌های صفحه‌بندی
     # ==========================================
     buttons = []
-
     nav_buttons = []
-
+    
     if page > 0:
-
-        nav_buttons.append(
-            InlineKeyboardButton(
-                "⬅️ قبلی",
-                callback_data=(
-                    f"cat_report_page:{page - 1}"
-                )
-            )
-        )
-
-    nav_buttons.append(
-        InlineKeyboardButton(
-            f"📄 {page + 1}/{total_pages}",
-            callback_data="ignore"
-        )
-    )
-
+        nav_buttons.append(InlineKeyboardButton("⬅️ قبلی", callback_data=f"cat_report_page:{page - 1}"))
+    
+    nav_buttons.append(InlineKeyboardButton(f"📄 {page + 1}/{total_pages}", callback_data="ignore"))
+    
     if page < total_pages - 1:
-
-        nav_buttons.append(
-            InlineKeyboardButton(
-                "➡️ بعدی",
-                callback_data=(
-                    f"cat_report_page:{page + 1}"
-                )
-            )
-        )
-
+        nav_buttons.append(InlineKeyboardButton("➡️ بعدی", callback_data=f"cat_report_page:{page + 1}"))
+        
     buttons.append(nav_buttons)
+    buttons.append([InlineKeyboardButton("🔙 انتخاب بازه", callback_data="cat_report_period_back")])
+    buttons.append([InlineKeyboardButton("🔙 انتخاب دسته", callback_data="cat_report_back_category")])
+    buttons.append([InlineKeyboardButton("🔙 بازگشت به گزارش‌ها", callback_data="reports_menu")])
+    
+    await category_report_edit_or_send(update, text, InlineKeyboardMarkup(buttons))
 
-    buttons.append([
-        InlineKeyboardButton(
-            "🔙 انتخاب بازه",
-            callback_data="cat_report_period_back"
-        )
-    ])
-
-    buttons.append([
-        InlineKeyboardButton(
-            "🔙 انتخاب دسته",
-            callback_data="cat_report_back_category"
-        )
-    ])
-
-    buttons.append([
-        InlineKeyboardButton(
-            "🔙 بازگشت به گزارش‌ها",
-            callback_data="reports_menu"
-        )
-    ])
-
-    await category_report_edit_or_send(
-        update,
-        text,
-        InlineKeyboardMarkup(buttons)
-    )
 
 
 async def category_report_edit_or_send(
