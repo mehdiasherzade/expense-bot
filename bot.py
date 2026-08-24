@@ -1417,7 +1417,76 @@ async def category_report_callback(update, context):
         return
 
     action = query.data
+        # ==========================================
+    # بازگشت به انتخاب بازه زمانی
+    # ==========================================
+    if action == "cat_report_period_back":
 
+        category_name = context.user_data.get(
+            "category_report_category"
+        )
+
+        if not category_name:
+            await category_report_show_categories(
+                update,
+                context,
+                from_callback=True
+            )
+            return
+
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    "📅 امروز",
+                    callback_data="cat_report_today"
+                ),
+                InlineKeyboardButton(
+                    "📅 این هفته",
+                    callback_data="cat_report_this_week"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📅 هفته گذشته",
+                    callback_data="cat_report_last_week"
+                ),
+                InlineKeyboardButton(
+                    "📅 این ماه",
+                    callback_data="cat_report_this_month"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📅 سه ماه اخیر",
+                    callback_data="cat_report_quarter"
+                ),
+                InlineKeyboardButton(
+                    "✏️ بازه دلخواه",
+                    callback_data="cat_report_manual"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 انتخاب دسته",
+                    callback_data="cat_report_back_category"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت به گزارش‌ها",
+                    callback_data="reports_menu"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            f"📂 گزارش دسته‌بندی\n\n"
+            f"{category_name}\n\n"
+            "📅 بازه زمانی را انتخاب کن:",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+        return
     # ==========================================
     # انتخاب دسته‌بندی
     # ==========================================
