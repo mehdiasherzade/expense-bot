@@ -124,6 +124,44 @@ def get_categories():
 
     return categories
 
+# ==========================================
+# گزارش هزینه بر اساس دسته‌بندی و بازه زمانی
+# ==========================================
+def get_category_report_expenses(
+    user_id,
+    category_name,
+    start_date,
+    end_date
+):
+    """
+    دریافت هزینه‌های یک دسته‌بندی در یک بازه زمانی.
+    start_date و end_date با فرمت YYYY-MM-DD هستند.
+    """
+
+    response = (
+        supabase
+        .table("expenses")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("category", category_name)
+        .gte("created_at", f"{start_date} 00:00:00")
+        .lte("created_at", f"{end_date} 23:59:59")
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    rows = response.data or []
+
+    return [
+        (
+            row["id"],
+            row["amount"],
+            row["description"],
+            row["category"],
+            row["created_at"]
+        )
+        for row in rows
+    ]
 def category_exists(name):
     response = supabase.table("categories").select("id").eq("name", name).execute()
     return len(response.data) > 0
@@ -1319,6 +1357,790 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
             reply_markup=InlineKeyboardMarkup(buttons)
         )
 
+# ==========================================
+# گزارش بر اساس دسته‌بندی
+# ==========================================
+
+async def category_report_button(update, context):
+    """شروع گزارش بر اساس دسته‌بندی"""
+
+    user_id = update.effective_user.id
+
+    if not is_allowed(user_id):
+        return
+
+    context.user_data.clear()
+
+    categories = get_categories()
+
+    buttons = []
+    row = []
+
+    for category_id, category_name in categories:
+        row.append(
+            InlineKeyboardButton(
+                category_name,
+                callback_data=f"cat_report_cat:{category_id}"
+            )
+        )
+
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+
+    if row:
+        buttons.append(row)
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 بازگشت به گزارش‌ها",
+            callback_data="reports_menu"
+        )
+    ])
+
+    await update.message.reply_text(
+        "📂 گزارش بر اساس دسته‌بندی\n\n"
+        "دسته‌بندی موردنظر را انتخاب کن:",
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
+
+
+async def category_report_callback(update, context):
+    """مدیریت گزارش بر اساس دسته‌بندی"""
+
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+
+    if not is_allowed(user_id):
+        return
+
+    action = query.data
+
+    # ==========================================
+    # انتخاب دسته‌بندی
+    # ==========================================
+    if action.startswith("cat_report_cat:"):
+
+        category_id = int(action.split(":")[1])
+
+        categories = get_categories()
+
+        category_name = None
+
+        for cat_id, cat_name in categories:
+            if cat_id == category_id:
+                category_name = cat_name
+                break
+
+        if not category_name:
+            await query.edit_message_text(
+                "❌ دسته‌بندی پیدا نشد."
+            )
+            return
+
+        context.user_data.clear()
+
+        context.user_data["category_report_category"] = category_name
+
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    "📅 امروز",
+                    callback_data="cat_report_today"
+                ),
+                InlineKeyboardButton(
+                    "📅 این هفته",
+                    callback_data="cat_report_this_week"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📅 هفته گذشته",
+                    callback_data="cat_report_last_week"
+                ),
+                InlineKeyboardButton(
+                    "📅 این ماه",
+                    callback_data="cat_report_this_month"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📅 سه ماه اخیر",
+                    callback_data="cat_report_quarter"
+                ),
+                InlineKeyboardButton(
+                    "✏️ بازه دلخواه",
+                    callback_data="cat_report_manual"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 انتخاب دسته",
+                    callback_data="cat_report_back_category"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت به گزارش‌ها",
+                    callback_data="reports_menu"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            f"📂 گزارش دسته‌بندی\n\n"
+            f"{category_name}\n\n"
+            "📅 بازه زمانی را انتخاب کن:",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+        return
+
+    # ==========================================
+    # بازگشت به انتخاب دسته
+    # ==========================================
+    if action == "cat_report_back_category":
+
+        await category_report_show_categories(
+            update,
+            context,
+            from_callback=True
+        )
+
+        return
+
+    # ==========================================
+    # امروز
+    # ==========================================
+    if action == "cat_report_today":
+
+        today = datetime.now(TEHRAN_TZ).date()
+
+        start_date = today.strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
+
+        await show_category_report(
+            update,
+            context,
+            start_date,
+            end_date,
+            "امروز"
+        )
+
+        return
+
+    # ==========================================
+    # این هفته
+    # شنبه تا امروز
+    # ==========================================
+    if action == "cat_report_this_week":
+
+        today = datetime.now(TEHRAN_TZ).date()
+
+        days_since_saturday = (today.weekday() + 2) % 7
+
+        start_of_week = today - timedelta(
+            days=days_since_saturday
+        )
+
+        start_date = start_of_week.strftime("%Y-%m-%d")
+        end_date = today.strftime("%Y-%m-%d")
+
+        await show_category_report(
+            update,
+            context,
+            start_date,
+            end_date,
+            "این هفته"
+        )
+
+        return
+
+    # ==========================================
+    # هفته گذشته
+    # شنبه تا جمعه
+    # ==========================================
+    if action == "cat_report_last_week":
+
+        today = datetime.now(TEHRAN_TZ).date()
+
+        days_since_saturday = (today.weekday() + 2) % 7
+
+        start_of_this_week = today - timedelta(
+            days=days_since_saturday
+        )
+
+        start_of_last_week = start_of_this_week - timedelta(days=7)
+
+        end_of_last_week = start_of_this_week - timedelta(days=1)
+
+        start_date = start_of_last_week.strftime("%Y-%m-%d")
+        end_date = end_of_last_week.strftime("%Y-%m-%d")
+
+        await show_category_report(
+            update,
+            context,
+            start_date,
+            end_date,
+            "هفته گذشته"
+        )
+
+        return
+
+    # ==========================================
+    # این ماه - بر اساس ماه شمسی
+    # ==========================================
+    if action == "cat_report_this_month":
+
+        today = datetime.now(TEHRAN_TZ).date()
+
+        today_jalali = jdatetime.date.fromgregorian(
+            date=today
+        )
+
+        first_day_jalali = jdatetime.date(
+            today_jalali.year,
+            today_jalali.month,
+            1
+        )
+
+        start_date = (
+            first_day_jalali
+            .togregorian()
+            .strftime("%Y-%m-%d")
+        )
+
+        end_date = today.strftime("%Y-%m-%d")
+
+        await show_category_report(
+            update,
+            context,
+            start_date,
+            end_date,
+            "این ماه"
+        )
+
+        return
+
+    # ==========================================
+    # سه ماه اخیر
+    # ==========================================
+    if action == "cat_report_quarter":
+
+        today = datetime.now(TEHRAN_TZ).date()
+
+        start_date = (
+            today - timedelta(days=90)
+        ).strftime("%Y-%m-%d")
+
+        end_date = today.strftime("%Y-%m-%d")
+
+        await show_category_report(
+            update,
+            context,
+            start_date,
+            end_date,
+            "سه ماه اخیر"
+        )
+
+        return
+
+    # ==========================================
+    # بازه دلخواه
+    # ==========================================
+    if action == "cat_report_manual":
+
+        context.user_data["waiting_category_report_start"] = True
+
+        await query.edit_message_text(
+            "✏️ بازه دلخواه\n\n"
+            "📅 تاریخ شروع را وارد کن:\n\n"
+            "شمسی:\n"
+            "1405-05-01\n\n"
+            "میلادی:\n"
+            "2026-07-23\n\n"
+            "فرمت‌های قابل قبول:\n"
+            "1405/05/01\n"
+            "1405.05.01"
+        )
+
+        return
+
+    # ==========================================
+    # صفحه‌بندی
+    # ==========================================
+    if action.startswith("cat_report_page:"):
+
+        page = int(action.split(":")[1])
+
+        context.user_data["category_report_page"] = page
+
+        start_date = context.user_data.get(
+            "category_report_start"
+        )
+
+        end_date = context.user_data.get(
+            "category_report_end"
+        )
+
+        period_title = context.user_data.get(
+            "category_report_period",
+            "بازه انتخابی"
+        )
+
+        if not start_date or not end_date:
+            await query.edit_message_text(
+                "❌ اطلاعات گزارش پیدا نشد.\n\n"
+                "لطفاً دوباره گزارش را اجرا کن."
+            )
+            return
+
+        await show_category_report(
+            update,
+            context,
+            start_date,
+            end_date,
+            period_title,
+            page=page
+        )
+
+        return
+
+
+async def category_report_show_categories(
+    update,
+    context,
+    from_callback=False
+):
+    """نمایش مجدد دسته‌بندی‌ها"""
+
+    categories = get_categories()
+
+    buttons = []
+    row = []
+
+    for category_id, category_name in categories:
+
+        row.append(
+            InlineKeyboardButton(
+                category_name,
+                callback_data=f"cat_report_cat:{category_id}"
+            )
+        )
+
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+
+    if row:
+        buttons.append(row)
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 بازگشت به گزارش‌ها",
+            callback_data="reports_menu"
+        )
+    ])
+
+    text = (
+        "📂 گزارش بر اساس دسته‌بندی\n\n"
+        "دسته‌بندی موردنظر را انتخاب کن:"
+    )
+
+    if from_callback and update.callback_query:
+
+        await update.callback_query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+    else:
+
+        await update.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+
+async def show_category_report(
+    update,
+    context,
+    start_date,
+    end_date,
+    period_title,
+    page=None
+):
+    """نمایش گزارش جزئیات یک دسته‌بندی"""
+
+    user_id = update.effective_user.id
+
+    category_name = context.user_data.get(
+        "category_report_category"
+    )
+
+    if not category_name:
+
+        text = (
+            "❌ دسته‌بندی گزارش مشخص نیست.\n\n"
+            "لطفاً دوباره گزارش را اجرا کن."
+        )
+
+        if update.callback_query:
+            await update.callback_query.edit_message_text(text)
+        else:
+            await update.message.reply_text(
+                text,
+                reply_markup=main_keyboard()
+            )
+
+        context.user_data.clear()
+        return
+
+    rows = get_category_report_expenses(
+        user_id,
+        category_name,
+        start_date,
+        end_date
+    )
+
+    # ذخیره اطلاعات برای صفحه‌بندی
+    context.user_data["category_report_start"] = start_date
+    context.user_data["category_report_end"] = end_date
+    context.user_data["category_report_period"] = period_title
+
+    if page is None:
+        page = context.user_data.get(
+            "category_report_page",
+            0
+        )
+
+    context.user_data["category_report_page"] = page
+
+    # ==========================================
+    # بدون هزینه
+    # ==========================================
+    if not rows:
+
+        start_jalali = to_jalali(start_date)
+        end_jalali = to_jalali(end_date)
+
+        if start_date == end_date:
+
+            date_text = start_jalali
+
+        else:
+
+            date_text = (
+                f"{start_jalali} تا {end_jalali}"
+            )
+
+        text = (
+            f"📂 {category_name}\n"
+            f"📅 {period_title}\n\n"
+            f"📅 {date_text}\n\n"
+            "❌ در این بازه برای این دسته "
+            "هیچ هزینه‌ای ثبت نشده."
+        )
+
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    "🔙 انتخاب بازه",
+                    callback_data=(
+                        f"cat_report_cat_back"
+                    )
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 انتخاب دسته",
+                    callback_data="cat_report_back_category"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت به گزارش‌ها",
+                    callback_data="reports_menu"
+                )
+            ]
+        ]
+
+        # چون cat_report_cat_back در تابع اصلی نیاز به
+        # رسیدگی جداگانه دارد، مستقیم به انتخاب بازه می‌رویم.
+        buttons[0][0] = InlineKeyboardButton(
+            "🔙 انتخاب بازه",
+            callback_data="cat_report_period_back"
+        )
+
+        await category_report_edit_or_send(
+            update,
+            text,
+            InlineKeyboardMarkup(buttons)
+        )
+
+        return
+
+        # ==========================================
+    # بازگشت به انتخاب بازه زمانی
+    # ==========================================
+    if action == "cat_report_period_back":
+
+        category_name = context.user_data.get(
+            "category_report_category"
+        )
+
+        if not category_name:
+            await category_report_show_categories(
+                update,
+                context,
+                from_callback=True
+            )
+            return
+
+        buttons = [
+            [
+                InlineKeyboardButton(
+                    "📅 امروز",
+                    callback_data="cat_report_today"
+                ),
+                InlineKeyboardButton(
+                    "📅 این هفته",
+                    callback_data="cat_report_this_week"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📅 هفته گذشته",
+                    callback_data="cat_report_last_week"
+                ),
+                InlineKeyboardButton(
+                    "📅 این ماه",
+                    callback_data="cat_report_this_month"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📅 سه ماه اخیر",
+                    callback_data="cat_report_quarter"
+                ),
+                InlineKeyboardButton(
+                    "✏️ بازه دلخواه",
+                    callback_data="cat_report_manual"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 انتخاب دسته",
+                    callback_data="cat_report_back_category"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🔙 بازگشت به گزارش‌ها",
+                    callback_data="reports_menu"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            f"📂 گزارش دسته‌بندی\n\n"
+            f"{category_name}\n\n"
+            "📅 بازه زمانی را انتخاب کن:",
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+        return
+    # ==========================================
+    # صفحه‌بندی
+    # ==========================================
+    limit = 5
+
+    total_items = len(rows)
+
+    total_pages = (
+        total_items + limit - 1
+    ) // limit
+
+    if page < 0:
+        page = 0
+
+    if page >= total_pages:
+        page = total_pages - 1
+
+    context.user_data["category_report_page"] = page
+
+    offset = page * limit
+
+    page_rows = rows[
+        offset:offset + limit
+    ]
+
+    total = sum(
+        row[1]
+        for row in rows
+    )
+
+    count = len(rows)
+
+    start_jalali = to_jalali(start_date)
+    end_jalali = to_jalali(end_date)
+
+    if start_date == end_date:
+
+        date_text = start_jalali
+
+    else:
+
+        date_text = (
+            f"{start_jalali} تا {end_jalali}"
+        )
+
+    # ==========================================
+    # متن گزارش
+    # ==========================================
+    text = (
+        f"📂 {category_name}\n"
+        f"📅 {period_title}\n"
+        f"📆 {date_text}\n\n"
+        f"📄 صفحه {page + 1} از {total_pages}\n"
+        f"💰 مجموع: {total:,} تومان\n"
+        f"🧾 تعداد: {count} مورد\n"
+        "━━━━━━━━━━━━\n\n"
+    )
+
+    for display_number, (
+        expense_id,
+        amount,
+        description,
+        category,
+        created_at
+    ) in enumerate(
+        page_rows,
+        start=offset + 1
+    ):
+
+        expense_date = (
+            created_at[:10]
+            if created_at
+            else ""
+        )
+
+        expense_date_jalali = to_jalali(
+            expense_date
+        )
+
+        expense_time = (
+            created_at[11:16]
+            if created_at and len(created_at) >= 16
+            else ""
+        )
+
+        text += (
+            f"#{display_number}\n"
+            f"💰 {amount:,} تومان\n"
+            f"📝 {description}\n"
+            f"📅 {expense_date_jalali}"
+        )
+
+        if expense_time:
+            text += f" | 🕐 {expense_time}"
+
+        text += "\n\n"
+
+    text += (
+        "━━━━━━━━━━━━\n"
+        f"🧾 تعداد کل: {count} مورد\n"
+        f"💵 مجموع کل: {total:,} تومان"
+    )
+
+    # ==========================================
+    # دکمه‌های صفحه‌بندی
+    # ==========================================
+    buttons = []
+
+    nav_buttons = []
+
+    if page > 0:
+
+        nav_buttons.append(
+            InlineKeyboardButton(
+                "⬅️ قبلی",
+                callback_data=(
+                    f"cat_report_page:{page - 1}"
+                )
+            )
+        )
+
+    nav_buttons.append(
+        InlineKeyboardButton(
+            f"📄 {page + 1}/{total_pages}",
+            callback_data="ignore"
+        )
+    )
+
+    if page < total_pages - 1:
+
+        nav_buttons.append(
+            InlineKeyboardButton(
+                "➡️ بعدی",
+                callback_data=(
+                    f"cat_report_page:{page + 1}"
+                )
+            )
+        )
+
+    buttons.append(nav_buttons)
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 انتخاب بازه",
+            callback_data="cat_report_period_back"
+        )
+    ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 انتخاب دسته",
+            callback_data="cat_report_back_category"
+        )
+    ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 بازگشت به گزارش‌ها",
+            callback_data="reports_menu"
+        )
+    ])
+
+    await category_report_edit_or_send(
+        update,
+        text,
+        InlineKeyboardMarkup(buttons)
+    )
+
+
+async def category_report_edit_or_send(
+    update,
+    text,
+    reply_markup
+):
+    """ارسال یا ویرایش پیام گزارش دسته‌بندی"""
+
+    if update.callback_query:
+
+        await update.callback_query.edit_message_text(
+            text,
+            reply_markup=reply_markup
+        )
+
+    else:
+
+        await update.message.reply_text(
+            text,
+            reply_markup=reply_markup
+        )
 async def edit_delete_menu(update, context):
     """نمایش هزینه‌ها با صفحه‌بندی برای حذف/ویرایش"""
     user_id = update.effective_user.id
@@ -3143,6 +3965,12 @@ async def reports_menu(update, context):
         ],
         [
             InlineKeyboardButton(
+                "📂 گزارش بر اساس دسته‌بندی",
+                callback_data="report_category"
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 "📋 لیست هزینه‌ها",
                 callback_data="report_recent"
             )
@@ -3179,6 +4007,18 @@ async def reports_callback(update, context):
 
     action = query.data
 
+    # ==========================================
+    # گزارش بر اساس دسته‌بندی
+    # ==========================================
+    if action == "report_category":
+
+        await category_report_show_categories(
+            update,
+            context,
+            from_callback=True
+        )
+
+        return
     # ==========================================
     # گزارش امروز
     # ==========================================
@@ -3900,7 +4740,116 @@ async def handle_message(update, context):
         )
 
         return
-    
+        # ==========================================
+    # گزارش دسته‌بندی - تاریخ شروع
+    # ==========================================
+    if context.user_data.get("waiting_category_report_start"):
+
+        date_info = get_date_info(message)
+
+        if not date_info:
+
+            await update.message.reply_text(
+                "❌ تاریخ نامعتبر است.\n\n"
+                "مثال شمسی:\n"
+                "1405-05-01\n\n"
+                "مثال میلادی:\n"
+                "2026-07-23",
+                reply_markup=back_keyboard()
+            )
+
+            return
+
+        start_date = date_info["gregorian"]
+
+        context.user_data.pop(
+            "waiting_category_report_start",
+            None
+        )
+
+        context.user_data[
+            "waiting_category_report_end"
+        ] = True
+
+        context.user_data[
+            "category_report_start"
+        ] = start_date
+
+        await update.message.reply_text(
+            "📅 تاریخ پایان را وارد کن:\n\n"
+            "شمسی:\n"
+            "1405-05-31\n\n"
+            "میلادی:\n"
+            "2026-08-22",
+            reply_markup=back_keyboard()
+        )
+
+        return
+
+
+    # ==========================================
+    # گزارش دسته‌بندی - تاریخ پایان
+    # ==========================================
+    if context.user_data.get("waiting_category_report_end"):
+
+        date_info = get_date_info(message)
+
+        if not date_info:
+
+            await update.message.reply_text(
+                "❌ تاریخ نامعتبر است.\n\n"
+                "مثال شمسی:\n"
+                "1405-05-31\n\n"
+                "مثال میلادی:\n"
+                "2026-08-22",
+                reply_markup=back_keyboard()
+            )
+
+            return
+
+        end_date = date_info["gregorian"]
+
+        start_date = context.user_data.get(
+            "category_report_start"
+        )
+
+        if not start_date:
+
+            context.user_data.clear()
+
+            await update.message.reply_text(
+                "❌ تاریخ شروع گزارش پیدا نشد.\n"
+                "لطفاً گزارش را دوباره اجرا کن.",
+                reply_markup=main_keyboard()
+            )
+
+            return
+
+        if end_date < start_date:
+
+            await update.message.reply_text(
+                "❌ تاریخ پایان نمی‌تواند "
+                "قبل از تاریخ شروع باشد.",
+                reply_markup=back_keyboard()
+            )
+
+            return
+
+        context.user_data.pop(
+            "waiting_category_report_end",
+            None
+        )
+
+        await show_category_report(
+            update,
+            context,
+            start_date,
+            end_date,
+            "بازه دلخواه",
+            page=0
+        )
+
+        return
     if context.user_data.get("waiting_advanced_start"):
         date_info = get_date_info(message)
 
@@ -4290,6 +5239,12 @@ async def reports_menu_callback(update, context):
                 callback_data="report_advanced"
             )
         ],
+                [
+            InlineKeyboardButton(
+                "📂 گزارش بر اساس دسته‌بندی",
+                callback_data="report_category"
+            )
+        ],
         [
             InlineKeyboardButton(
                 "📋 لیست هزینه‌ها",
@@ -4443,9 +5398,9 @@ def main():
     app.add_handler(CallbackQueryHandler(quick_edit_select_callback, pattern=r"^quick_edit_select_"))
     app.add_handler(CallbackQueryHandler(quick_delete_confirm_callback, pattern=r"^quick_delete_confirm_"))
     app.add_handler(CallbackQueryHandler(quick_add_category_callback, pattern=r"^quick_add_cat_"))
-
+    app.add_handler(CallbackQueryHandler(category_report_callback, pattern=r"^cat_report_"))
     app.add_handler(CallbackQueryHandler(reports_menu_callback, pattern=r"^reports_menu$"))
-    app.add_handler(CallbackQueryHandler(reports_callback, pattern=r"^report_(today|date|month|advanced|recent|stats)$"))
+    app.add_handler(CallbackQueryHandler(reports_callback, pattern=r"^report_(today|date|month|advanced|recent|stats|category)$"))
     
     print("✅ ربات اجرا شد!")
     app.run_polling()
