@@ -1,0 +1,13 @@
+# متغیرهای محیطی (توکن ربات و کلید Supabase — هرگز کامیت نشوند)
+.env
+.env.*
+
+# پایتون
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# سیستم‌عامل
+.DS_Store
+Thumbs.db
