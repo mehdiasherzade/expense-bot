@@ -807,7 +807,90 @@ async def advanced_quick_callback(update, context):
         end_date,
         from_callback=True
     )
+def build_advanced_report_page(text, expense_rows, page=0):
+    """ساخت صفحه لیست هزینه‌های گزارش پیشرفته"""
 
+    limit = 5
+    total_items = len(expense_rows)
+    total_pages = max(1, (total_items + limit - 1) // limit)
+
+    if page < 0:
+        page = 0
+    if page >= total_pages:
+        page = total_pages - 1
+
+    offset = page * limit
+    page_rows = expense_rows[offset:offset + limit]
+
+    text += "\n━━━━━━━━━━━━\n"
+    text += f"🧾 لیست هزینه‌ها — صفحه {page + 1} از {total_pages}\n\n"
+
+    for display_number, row in enumerate(
+        page_rows,
+        start=offset + 1
+    ):
+        expense_id = row.get("id")
+        amount = row.get("amount", 0)
+        description = row.get("description", "")
+        category = row.get("category", "📦 سایر")
+        created_at = row.get("created_at", "")
+
+        expense_date = created_at[:10] if created_at else ""
+        expense_date_jalali = to_jalali(expense_date)
+
+        expense_time = (
+            created_at[11:16]
+            if created_at and len(created_at) >= 16
+            else ""
+        )
+
+        text += f"#{display_number} {category}\n"
+        text += f"💰 {amount:,} تومان\n"
+        text += f"📝 {description}\n"
+        text += f"📅 {expense_date_jalali}"
+
+        if expense_time:
+            text += f" | 🕐 {expense_time}"
+
+        text += "\n\n"
+
+    buttons = []
+
+    navigation = []
+
+    if page > 0:
+        navigation.append(
+            InlineKeyboardButton(
+                "⬅️ قبلی",
+                callback_data=f"advanced_report_page:{page - 1}"
+            )
+        )
+
+    navigation.append(
+        InlineKeyboardButton(
+            f"📄 {page + 1}/{total_pages}",
+            callback_data="ignore"
+        )
+    )
+
+    if page < total_pages - 1:
+        navigation.append(
+            InlineKeyboardButton(
+                "➡️ بعدی",
+                callback_data=f"advanced_report_page:{page + 1}"
+            )
+        )
+
+    buttons.append(navigation)
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 بازگشت به گزارش‌ها",
+            callback_data="reports_menu"
+        )
+    ])
+
+    return text, buttons
 async def show_advanced_report(update, context, start_date, end_date, from_callback=False):
     """نمایش گزارش پیشرفته با تاریخ شمسی + لیست هزینه‌ها با صفحه‌بندی ۵تایی"""
     user_id = update.effective_user.id
