@@ -4503,17 +4503,16 @@ def main():
     
     request = HTTPXRequest(connect_timeout=60, read_timeout=60, write_timeout=60, pool_timeout=60)
     app = Application.builder().token(TOKEN).request(request).get_updates_request(request).build()
-    
-    app.add_handler(CommandHandler("start", start))
-    
-    app.add_error_handler(error_handler)
-
     application.add_handler(
     CallbackQueryHandler(
         advanced_report_page_callback,
         pattern=r"^advanced_report_page:"
     )
 )
+    app.add_handler(CommandHandler("start", start))
+    
+    app.add_error_handler(error_handler)
+
     app.add_handler(CallbackQueryHandler(delete_callback, pattern=r"^delete:\d+$"))
     app.add_handler(CallbackQueryHandler(confirm_delete_callback, pattern=r"^confirm_delete:\d+$"))
     app.add_handler(CallbackQueryHandler(cancel_delete_callback, pattern=r"^cancel_delete$"))
