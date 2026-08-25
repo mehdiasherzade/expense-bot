@@ -809,7 +809,7 @@ async def advanced_quick_callback(update, context):
     )
 
 async def show_advanced_report(update, context, start_date, end_date, from_callback=False):
-    """نمایش گزارش پیشرفته با تاریخ شمسی + لیست کامل هزینه‌ها"""
+    """نمایش گزارش پیشرفته با تاریخ شمسی + لیست هزینه‌ها با صفحه‌بندی ۵تایی"""
     user_id = update.effective_user.id
 
     # تبدیل تاریخ‌ها به شمسی برای نمایش
@@ -851,7 +851,13 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
         context.user_data.clear()
         return
 
-    # مرتب‌سازی دسته‌بندی‌ها بر اساس مبلغ (بیشترین اول)
+    # ذخیره اطلاعات گزارش برای صفحه‌بندی
+    context.user_data["advanced_report_expenses"] = expense_rows
+    context.user_data["advanced_report_start_date"] = start_date
+    context.user_data["advanced_report_end_date"] = end_date
+    context.user_data["advanced_report_page"] = 0
+
+    # مرتب‌سازی دسته‌بندی‌ها بر اساس مبلغ
     category_rows_sorted = sorted(
         category_rows,
         key=lambda x: x[1],
@@ -866,10 +872,7 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
     else:
         report_title = "📅 گزارش بر اساس تاریخ"
 
-    # ==========================================
-    # ساخت گزارش اصلی
-    # ==========================================
-
+    # ساخت بخش ثابت گزارش
     text = f"{report_title}\n\n"
     text += f"📅 از {start_jalali}\n"
     text += f"📅 تا {end_jalali}\n\n"
@@ -881,10 +884,7 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
     text += f"📊 میانگین هر هزینه: {average:,}\n"
     text += f"🔝 بیشترین هزینه: {maximum:,}\n\n"
 
-    # ==========================================
     # بر اساس دسته‌بندی
-    # ==========================================
-
     text += "━━━━━━━━━━━━\n"
     text += "📊 بر اساس دسته‌بندی\n\n"
 
@@ -892,10 +892,7 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
         text += f"{category}\n"
         text += f"💰 {amount:,} تومان ({cnt} مورد)\n\n"
 
-    # ==========================================
     # روند روزانه
-    # ==========================================
-
     if daily_rows:
         text += "━━━━━━━━━━━━\n"
         text += "📅 روند روزانه\n\n"
@@ -910,43 +907,12 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
             date_jalali = to_jalali(date_text)
             text += f"{date_jalali}: {amount:,} تومان\n"
 
-    # ==========================================
-    # لیست کامل هزینه‌ها
-    # ==========================================
-
-    text += "\n━━━━━━━━━━━━\n"
-    text += "📋 لیست هزینه‌ها\n\n"
-
-    for index, row in enumerate(expense_rows, start=1):
-        amount = int(row.get("amount", 0))
-        description = row.get("description", "")
-        category = row.get("category", "")
-        created_at = str(row.get("created_at", ""))
-
-        # تاریخ و ساعت
-        date_part = to_jalali(created_at)
-
-        time_part = (
-            created_at[11:16]
-            if len(created_at) >= 16
-            else ""
-        )
-
-        text += f"{index}️⃣ {category}\n"
-        text += f"💰 {amount:,} تومان\n"
-        text += f"📝 {description}\n"
-        text += f"📅 {date_part} | 🕐 {time_part}\n\n"
-
-    # پاک کردن state
-    context.user_data.clear()
-
-    # دکمه بازگشت
-    buttons = [[
-        InlineKeyboardButton(
-            "🔙 بازگشت به گزارش‌ها",
-            callback_data="reports_menu"
-        )
-    ]]
+    # نمایش صفحه اول لیست هزینه‌ها
+    text, buttons = build_advanced_report_page(
+        text,
+        expense_rows,
+        page=0
+    )
 
     if from_callback and update.callback_query:
         await update.callback_query.edit_message_text(
@@ -958,6 +924,237 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
             text,
             reply_markup=InlineKeyboardMarkup(buttons)
         )
+async def show_advanced_report(update, context, start_date, end_date, from_callback=False):
+    """نمایش گزارش پیشرفته با تاریخ شمسی + لیست هزینه‌ها با صفحه‌بندی ۵تایی"""
+    user_id = update.effective_user.id
+
+    # تبدیل تاریخ‌ها به شمسی برای نمایش
+    start_jalali = to_jalali(start_date)
+    end_jalali = to_jalali(end_date)
+
+    # دریافت آمار
+    (total, count, average, maximum), daily_rows, category_rows = get_advanced_stats(
+        user_id,
+        start_date,
+        end_date
+    )
+
+    # دریافت تمام هزینه‌های همین بازه
+    response = (
+        supabase
+        .table("expenses")
+        .select("*")
+        .eq("user_id", user_id)
+        .gte("created_at", f"{start_date} 00:00:00")
+        .lte("created_at", f"{end_date} 23:59:59")
+        .order("id", desc=True)
+        .execute()
+    )
+
+    expense_rows = response.data or []
+
+    if count == 0 or not expense_rows:
+        if from_callback and update.callback_query:
+            await update.callback_query.edit_message_text(
+                "📊 در این بازه هزینه‌ای ثبت نشده."
+            )
+        else:
+            await update.message.reply_text(
+                "📊 در این بازه هزینه‌ای ثبت نشده.",
+                reply_markup=main_keyboard()
+            )
+
+        context.user_data.clear()
+        return
+
+    # ذخیره اطلاعات گزارش برای صفحه‌بندی
+    context.user_data["advanced_report_expenses"] = expense_rows
+    context.user_data["advanced_report_start_date"] = start_date
+    context.user_data["advanced_report_end_date"] = end_date
+    context.user_data["advanced_report_page"] = 0
+
+    # مرتب‌سازی دسته‌بندی‌ها بر اساس مبلغ
+    category_rows_sorted = sorted(
+        category_rows,
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    # عنوان هوشمند گزارش
+    today = datetime.now(TEHRAN_TZ).strftime("%Y-%m-%d")
+
+    if start_date == today and end_date == today:
+        report_title = "📊 گزارش امروز"
+    else:
+        report_title = "📅 گزارش بر اساس تاریخ"
+
+    # ساخت بخش ثابت گزارش
+    text = f"{report_title}\n\n"
+    text += f"📅 از {start_jalali}\n"
+    text += f"📅 تا {end_jalali}\n\n"
+
+    # آمار کلی
+    text += "━━━━━━━━━━━━\n"
+    text += f"💵 مجموع: {total:,} تومان\n"
+    text += f"🧾 تعداد: {count}\n"
+    text += f"📊 میانگین هر هزینه: {average:,}\n"
+    text += f"🔝 بیشترین هزینه: {maximum:,}\n\n"
+
+    # بر اساس دسته‌بندی
+    text += "━━━━━━━━━━━━\n"
+    text += "📊 بر اساس دسته‌بندی\n\n"
+
+    for category, amount, cnt in category_rows_sorted:
+        text += f"{category}\n"
+        text += f"💰 {amount:,} تومان ({cnt} مورد)\n\n"
+
+    # روند روزانه
+    if daily_rows:
+        text += "━━━━━━━━━━━━\n"
+        text += "📅 روند روزانه\n\n"
+
+        daily_rows_sorted = sorted(
+            daily_rows,
+            key=lambda x: x[0],
+            reverse=True
+        )
+
+        for date_text, amount, _ in daily_rows_sorted:
+            date_jalali = to_jalali(date_text)
+            text += f"{date_jalali}: {amount:,} تومان\n"
+
+    # نمایش صفحه اول لیست هزینه‌ها
+    text, buttons = build_advanced_report_page(
+        text,
+        expense_rows,
+        page=0
+    )
+
+    if from_callback and update.callback_query:
+        await update.callback_query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+    else:
+        await update.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+async def advanced_report_page_callback(update, context):
+    """جابجایی بین صفحات لیست هزینه‌های گزارش پیشرفته"""
+
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+
+    if not is_allowed(user_id):
+        return
+
+    # اطلاعات گزارش ذخیره شده؟
+    expense_rows = context.user_data.get(
+        "advanced_report_expenses"
+    )
+
+    start_date = context.user_data.get(
+        "advanced_report_start_date"
+    )
+
+    end_date = context.user_data.get(
+        "advanced_report_end_date"
+    )
+
+    if not expense_rows or not start_date or not end_date:
+        await query.answer(
+            "❌ اطلاعات این گزارش دیگر در دسترس نیست.",
+            show_alert=True
+        )
+        return
+
+    # صفحه درخواستی
+    try:
+        page = int(
+            query.data.split(":")[1]
+        )
+    except (IndexError, ValueError):
+        page = 0
+
+    # دوباره آمار را دریافت می‌کنیم
+    (
+        total,
+        count,
+        average,
+        maximum
+    ), daily_rows, category_rows = get_advanced_stats(
+        user_id,
+        start_date,
+        end_date
+    )
+
+    # مرتب‌سازی دسته‌بندی‌ها
+    category_rows_sorted = sorted(
+        category_rows,
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    start_jalali = to_jalali(start_date)
+    end_jalali = to_jalali(end_date)
+
+    today = datetime.now(
+        TEHRAN_TZ
+    ).strftime("%Y-%m-%d")
+
+    if start_date == today and end_date == today:
+        report_title = "📊 گزارش امروز"
+    else:
+        report_title = "📅 گزارش بر اساس تاریخ"
+
+    # ساخت گزارش ثابت
+    text = f"{report_title}\n\n"
+    text += f"📅 از {start_jalali}\n"
+    text += f"📅 تا {end_jalali}\n\n"
+
+    text += "━━━━━━━━━━━━\n"
+    text += f"💵 مجموع: {total:,} تومان\n"
+    text += f"🧾 تعداد: {count}\n"
+    text += f"📊 میانگین هر هزینه: {average:,}\n"
+    text += f"🔝 بیشترین هزینه: {maximum:,}\n\n"
+
+    # دسته‌بندی‌ها
+    text += "━━━━━━━━━━━━\n"
+    text += "📊 بر اساس دسته‌بندی\n\n"
+
+    for category, amount, cnt in category_rows_sorted:
+        text += f"{category}\n"
+        text += f"💰 {amount:,} تومان ({cnt} مورد)\n\n"
+
+    # روند روزانه
+    if daily_rows:
+        text += "━━━━━━━━━━━━\n"
+        text += "📅 روند روزانه\n\n"
+
+        daily_rows_sorted = sorted(
+            daily_rows,
+            key=lambda x: x[0],
+            reverse=True
+        )
+
+        for date_text, amount, _ in daily_rows_sorted:
+            date_jalali = to_jalali(date_text)
+            text += f"{date_jalali}: {amount:,} تومان\n"
+
+    # ساخت صفحه موردنظر
+    text, buttons = build_advanced_report_page(
+        text,
+        expense_rows,
+        page=page
+    )
+
+    await query.edit_message_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(buttons)
+    )
 # ==========================================
 # گزارش بر اساس دسته‌بندی
 # ==========================================
@@ -4384,7 +4581,7 @@ def main():
     app.add_handler(CallbackQueryHandler(category_report_callback, pattern=r"^cat_report_"))
     app.add_handler(CallbackQueryHandler(reports_menu_callback, pattern=r"^reports_menu$"))
     app.add_handler(CallbackQueryHandler(reports_callback, pattern=r"^report_(advanced|recent|stats|category)$"))
-    
+    application.add_handler(CallbackQueryHandler(advanced_report_page_callback, pattern=r"^advanced_report_page:"))
     print("✅ ربات اجرا شد!")
     app.run_polling(drop_pending_updates=True)
 
