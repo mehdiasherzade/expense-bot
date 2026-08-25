@@ -4503,7 +4503,7 @@ def main():
     
     request = HTTPXRequest(connect_timeout=60, read_timeout=60, write_timeout=60, pool_timeout=60)
     app = Application.builder().token(TOKEN).request(request).get_updates_request(request).build()
-    application.add_handler(
+    app.add_handler(
     CallbackQueryHandler(
         advanced_report_page_callback,
         pattern=r"^advanced_report_page:"
