@@ -154,6 +154,15 @@ def get_categories():
     return categories
 
 # ==========================================
+# توابع کمکی بازه زمانی (الگوی نیمه‌باز: gte شروع، lt پایان)
+# ==========================================
+TEHRAN_OFFSET = "+03:30"  # ایران از ۱۴۰۱ ساعت تابستانی ندارد
+
+def next_day_text(date_text):
+    """فردای date_text با فرمت YYYY-MM-DD (برای حد بالای بازه نیمه‌باز)."""
+    return (datetime.strptime(date_text, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+
+# ==========================================
 # گزارش هزینه بر اساس دسته‌بندی و بازه زمانی
 # ==========================================
 def get_category_report_expenses(
@@ -173,8 +182,8 @@ def get_category_report_expenses(
         .select("*")
         .eq("user_id", user_id)
         .eq("category", category_name)
-        .gte("created_at", f"{start_date} 00:00:00")
-        .lte("created_at", f"{end_date} 23:59:59")
+        .gte("created_at", f"{start_date} 00:00:00{TEHRAN_OFFSET}")
+        .lt("created_at", f"{next_day_text(end_date)} 00:00:00{TEHRAN_OFFSET}")
         .order("created_at", desc=True)
         .execute()
     )
@@ -221,9 +230,15 @@ def delete_category(category_id):
     if not response.data:
         return False
     category_name = response.data[0]["name"]
-    if category_name == "📦 سایر":
+    # دسته مقصد («سایر») باید موجود باشد؛ وگرنه حذف انجام نمی‌شود
+    other_response = supabase.table("categories").select("name").eq("name", "📦 سایر").execute()
+    if not other_response.data:
+        logger.warning("دسته «📦 سایر» پیدا نشد؛ حذف دسته لغو شد.")
         return False
-    supabase.table("expenses").update({"category": "📦 سایر"}).eq("category", category_name).execute()
+    other_name = other_response.data[0]["name"]
+    if category_name == other_name:
+        return False
+    supabase.table("expenses").update({"category": other_name}).eq("category", category_name).execute()
     supabase.table("categories").delete().eq("id", category_id).execute()
     return True
     
@@ -289,13 +304,12 @@ def get_recent_expenses(user_id, limit=10):
 
 def get_day_expenses(user_id, date_text):
     # بازه‌ی دقیق یک روز؛ مستقل از طول زمان/میلی‌ثانیه‌ی created_at
-    next_date = (datetime.strptime(date_text, "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     response = (
         supabase.table("expenses")
         .select("*")
         .eq("user_id", user_id)
-        .gte("created_at", f"{date_text} 00:00:00")
-        .lt("created_at", f"{next_date} 00:00:00")
+        .gte("created_at", f"{date_text} 00:00:00{TEHRAN_OFFSET}")
+        .lt("created_at", f"{next_day_text(date_text)} 00:00:00{TEHRAN_OFFSET}")
         .order("id", desc=True)
         .execute()
     )
@@ -314,16 +328,29 @@ def get_month_expenses(user_id, month_text):
         supabase.table("expenses")
         .select("*")
         .eq("user_id", user_id)
-        .gte("created_at", f"{month_text}-01 00:00:00")
-        .lt("created_at", f"{next_month_text} 00:00:00")
+        .gte("created_at", f"{month_text}-01 00:00:00{TEHRAN_OFFSET}")
+        .lt("created_at", f"{next_month_text} 00:00:00{TEHRAN_OFFSET}")
         .order("id", desc=True)
         .execute()
     )
     return response.data
 
-def get_advanced_stats(user_id, start_date, end_date):
-    response = supabase.table("expenses").select("*").eq("user_id", user_id).gte("created_at", f"{start_date} 00:00:00").lte("created_at", f"{end_date} 23:59:59").execute()
-    rows = response.data
+def get_expenses_in_range(user_id, start_date, end_date):
+    """دریافت هزینه‌های یک بازه (نیمه‌باز: از ابتدای روز شروع تا ابتدای روز بعد از پایان)."""
+    response = (
+        supabase
+        .table("expenses")
+        .select("*")
+        .eq("user_id", user_id)
+        .gte("created_at", f"{start_date} 00:00:00{TEHRAN_OFFSET}")
+        .lt("created_at", f"{next_day_text(end_date)} 00:00:00{TEHRAN_OFFSET}")
+        .order("id", desc=True)
+        .execute()
+    )
+    return response.data or []
+
+def compute_stats(rows):
+    """محاسبه آمار کلی/روزانه/دسته‌بندی از روی ردیف‌ها (بدون کوئری مجدد)."""
     if not rows:
         return (0, 0, 0, 0), [], []
     total = sum(r["amount"] for r in rows)
@@ -343,6 +370,10 @@ def get_advanced_stats(user_id, start_date, end_date):
     daily_rows = [(d, a, 1) for d, a in daily.items()]
     category_rows = [(c, d["total"], d["count"]) for c, d in category.items()]
     return (total, count, average, maximum), daily_rows, category_rows
+
+def get_advanced_stats(user_id, start_date, end_date):
+    rows = get_expenses_in_range(user_id, start_date, end_date)
+    return compute_stats(rows)
 
 # ==========================================
 # توابع کمکی
@@ -423,7 +454,7 @@ def to_jalali(date_str):
         gregorian = datetime(year, month, day)
         jalali = jdatetime.date.fromgregorian(date=gregorian)
         return f"{jalali.year:04d}-{jalali.month:02d}-{jalali.day:02d}"
-    except:
+    except Exception:
         # اگر خطایی رخ داد، همان تاریخ میلادی را برگردان
         return date_str[:10] if len(date_str) >= 10 else ""
 
@@ -605,7 +636,7 @@ async def render_quick_expenses_menu(update, context):
     keyboard.append([InlineKeyboardButton("🔙 بازگشت", callback_data="back_menu")])
 
     if quick_items:
-        text = "🧾 **هزینه‌های سریع**\n\n"
+        text = "🧾 هزینه‌های سریع\n\n"
         text += "یکی از گزینه‌های زیر رو انتخاب کن تا هزینه ثبت بشه:\n\n"
         text += "\n".join(
             f"• {item['name']} — {item['amount']:,} تومان — {item['category']}"
@@ -613,7 +644,7 @@ async def render_quick_expenses_menu(update, context):
         )
     else:
         text = (
-            "🧾 **هزینه‌های سریع**\n\n"
+            "🧾 هزینه‌های سریع\n\n"
             "هنوز هیچ هزینه سریعی ثبت نشده است.\n\n"
             "از «⚙️ مدیریت هزینه‌های سریع» می‌تونی "
             "یک مورد جدید اضافه کنی."
@@ -665,7 +696,7 @@ async def quick_manage_callback(update, context):
     ]
 
     await query.edit_message_text(
-        "⚙️ **مدیریت هزینه‌های سریع**\n\n"
+        "⚙️ مدیریت هزینه‌های سریع\n\n"
         "می‌توانی هزینه‌های سریع رو مدیریت کنی:\n"
         "➕ افزودن هزینه جدید\n"
         "✏️ ویرایش مبلغ یا نام\n"
@@ -829,7 +860,6 @@ def build_advanced_report_page(text, expense_rows, page=0):
         page_rows,
         start=offset + 1
     ):
-        expense_id = row.get("id")
         amount = row.get("amount", 0)
         description = row.get("description", "")
         category = row.get("category", "📦 سایر")
@@ -899,142 +929,9 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
     start_jalali = to_jalali(start_date)
     end_jalali = to_jalali(end_date)
 
-    # دریافت آمار
-    (total, count, average, maximum), daily_rows, category_rows = get_advanced_stats(
-        user_id,
-        start_date,
-        end_date
-    )
-
-    # دریافت تمام هزینه‌های همین بازه
-    response = (
-        supabase
-        .table("expenses")
-        .select("*")
-        .eq("user_id", user_id)
-        .gte("created_at", f"{start_date} 00:00:00")
-        .lte("created_at", f"{end_date} 23:59:59")
-        .order("id", desc=True)
-        .execute()
-    )
-
-    expense_rows = response.data or []
-
-    if count == 0 or not expense_rows:
-        if from_callback and update.callback_query:
-            await update.callback_query.edit_message_text(
-                "📊 در این بازه هزینه‌ای ثبت نشده."
-            )
-        else:
-            await update.message.reply_text(
-                "📊 در این بازه هزینه‌ای ثبت نشده.",
-                reply_markup=main_keyboard()
-            )
-
-        context.user_data.clear()
-        return
-
-    # ذخیره اطلاعات گزارش برای صفحه‌بندی
-    context.user_data["advanced_report_expenses"] = expense_rows
-    context.user_data["advanced_report_start_date"] = start_date
-    context.user_data["advanced_report_end_date"] = end_date
-    context.user_data["advanced_report_page"] = 0
-
-    # مرتب‌سازی دسته‌بندی‌ها بر اساس مبلغ
-    category_rows_sorted = sorted(
-        category_rows,
-        key=lambda x: x[1],
-        reverse=True
-    )
-
-    # عنوان هوشمند گزارش
-    today = datetime.now(TEHRAN_TZ).strftime("%Y-%m-%d")
-
-    if start_date == today and end_date == today:
-        report_title = "📊 گزارش امروز"
-    else:
-        report_title = "📅 گزارش بر اساس تاریخ"
-
-    # ساخت بخش ثابت گزارش
-    text = f"{report_title}\n\n"
-    text += f"📅 از {start_jalali}\n"
-    text += f"📅 تا {end_jalali}\n\n"
-
-    # آمار کلی
-    text += "━━━━━━━━━━━━\n"
-    text += f"💵 مجموع: {total:,} تومان\n"
-    text += f"🧾 تعداد: {count}\n"
-    text += f"📊 میانگین هر هزینه: {average:,}\n"
-    text += f"🔝 بیشترین هزینه: {maximum:,}\n\n"
-
-    # بر اساس دسته‌بندی
-    text += "━━━━━━━━━━━━\n"
-    text += "📊 بر اساس دسته‌بندی\n\n"
-
-    for category, amount, cnt in category_rows_sorted:
-        text += f"{category}\n"
-        text += f"💰 {amount:,} تومان ({cnt} مورد)\n\n"
-
-    # روند روزانه
-    if daily_rows:
-        text += "━━━━━━━━━━━━\n"
-        text += "📅 روند روزانه\n\n"
-
-        daily_rows_sorted = sorted(
-            daily_rows,
-            key=lambda x: x[0],
-            reverse=True
-        )
-
-        for date_text, amount, _ in daily_rows_sorted:
-            date_jalali = to_jalali(date_text)
-            text += f"{date_jalali}: {amount:,} تومان\n"
-
-    # نمایش صفحه اول لیست هزینه‌ها
-    text, buttons = build_advanced_report_page(
-        text,
-        expense_rows,
-        page=0
-    )
-
-    if from_callback and update.callback_query:
-        await update.callback_query.edit_message_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-    else:
-        await update.message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(buttons)
-        )
-async def show_advanced_report(update, context, start_date, end_date, from_callback=False):
-    """نمایش گزارش پیشرفته با تاریخ شمسی + لیست هزینه‌ها با صفحه‌بندی ۵تایی"""
-    user_id = update.effective_user.id
-
-    # تبدیل تاریخ‌ها به شمسی برای نمایش
-    start_jalali = to_jalali(start_date)
-    end_jalali = to_jalali(end_date)
-
-    # دریافت آمار
-    (total, count, average, maximum), daily_rows, category_rows = get_advanced_stats(
-        user_id,
-        start_date,
-        end_date
-    )
-
-    # دریافت تمام هزینه‌های همین بازه
-    response = (
-        supabase
-        .table("expenses")
-        .select("*")
-        .eq("user_id", user_id)
-        .gte("created_at", f"{start_date} 00:00:00")
-        .lte("created_at", f"{end_date} 23:59:59")
-        .order("id", desc=True)
-        .execute()
-    )
-
-    expense_rows = response.data or []
+    # دریافت هزینه‌های بازه (یک کوئری) و محاسبه آمار از همان داده‌ها
+    expense_rows = get_expenses_in_range(user_id, start_date, end_date)
+    (total, count, average, maximum), daily_rows, category_rows = compute_stats(expense_rows)
 
     if count == 0 or not expense_rows:
         if from_callback and update.callback_query:
@@ -1162,17 +1059,13 @@ async def advanced_report_page_callback(update, context):
     except (IndexError, ValueError):
         page = 0
 
-    # دوباره آمار را دریافت می‌کنیم
+    # آمار از روی همان داده‌های ذخیره‌شده محاسبه می‌شود (بدون کوئری مجدد)
     (
         total,
         count,
         average,
         maximum
-    ), daily_rows, category_rows = get_advanced_stats(
-        user_id,
-        start_date,
-        end_date
-    )
+    ), daily_rows, category_rows = compute_stats(expense_rows)
 
     # مرتب‌سازی دسته‌بندی‌ها
     category_rows_sorted = sorted(
@@ -2829,7 +2722,7 @@ async def quick_edit_callback(update, context):
 
     if not quick_items:
         await query.edit_message_text(
-            "📋 **هیچ هزینه سریعی برای ویرایش وجود ندارد.**\n\n"
+            "📋 هیچ هزینه سریعی برای ویرایش وجود ندارد.\n\n"
             "ابتدا از طریق «➕ افزودن هزینه سریع» یک هزینه اضافه کن.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")]
@@ -2849,7 +2742,7 @@ async def quick_edit_callback(update, context):
     buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")])
 
     await query.edit_message_text(
-        "✏️ **ویرایش هزینه سریع**\n\n"
+        "✏️ ویرایش هزینه سریع\n\n"
         "هزینه‌ای که میخوای ویرایش کنی رو انتخاب کن:",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
@@ -2868,7 +2761,7 @@ async def quick_delete_callback(update, context):
 
     if not quick_items:
         await query.edit_message_text(
-            "📋 **هیچ هزینه سریعی برای حذف وجود ندارد.**",
+            "📋 هیچ هزینه سریعی برای حذف وجود ندارد.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")]
             ])
@@ -2887,7 +2780,7 @@ async def quick_delete_callback(update, context):
     buttons.append([InlineKeyboardButton("🔙 بازگشت", callback_data="quick_manage")])
 
     await query.edit_message_text(
-        "🗑️ **حذف هزینه سریع**\n\n"
+        "🗑️ حذف هزینه سریع\n\n"
         "هزینه‌ای که میخوای حذف کنی رو انتخاب کن:\n\n"
         "⚠️ فقط از لیست هزینه‌های سریع حذف میشه.",
         reply_markup=InlineKeyboardMarkup(buttons)
@@ -2914,9 +2807,15 @@ async def export_excel(update, context, from_callback=False):
     user_id = update.effective_user.id
 
     if not is_allowed(user_id):
-        await update.message.reply_text(
-            "⛔ شما اجازه استفاده از این بخش را ندارید."
-        )
+        if from_callback and update.callback_query:
+            await update.callback_query.answer(
+                "⛔ شما اجازه استفاده از این بخش را ندارید.",
+                show_alert=True
+            )
+        else:
+            await update.message.reply_text(
+                "⛔ شما اجازه استفاده از این بخش را ندارید."
+            )
         return
 
     current_month = datetime.now(TEHRAN_TZ)
@@ -2964,10 +2863,15 @@ async def export_excel(update, context, from_callback=False):
         rows = response.data or []
 
         if not rows:
-            await update.message.reply_text(
-                "📊 این ماه هنوز هزینه‌ای ثبت نشده.",
-                reply_markup=main_keyboard()
-            )
+            if from_callback and update.callback_query:
+                await update.callback_query.edit_message_text(
+                    "📊 این ماه هنوز هزینه‌ای ثبت نشده."
+                )
+            else:
+                await update.message.reply_text(
+                    "📊 این ماه هنوز هزینه‌ای ثبت نشده.",
+                    reply_markup=main_keyboard()
+                )
             return
 
         # ==========================================
@@ -4235,8 +4139,13 @@ async def handle_message(update, context):
         if message in categories:
             await choose_category(update, context, message)
             return
+        await update.message.reply_text(
+            "❌ دسته‌بندی نامعتبر است.\n\nاز دکمه‌های زیر انتخاب کن:",
+            reply_markup=category_keyboard()
+        )
+        return
 
-        # ==========================================
+    # ==========================================
     # ثبت مبلغ و توضیح بعد از انتخاب دسته
     # ==========================================
     if context.user_data.get("waiting_for_amount"):
@@ -4282,6 +4191,11 @@ async def handle_message(update, context):
         if updated:
             await update.message.reply_text(
                 f"✅ هزینه #{expense_id} ویرایش شد.\n\n{category}\n💰 {amount:,} تومان\n📝 {description}",
+                reply_markup=main_keyboard()
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ ویرایش هزینه #{expense_id} انجام نشد.",
                 reply_markup=main_keyboard()
             )
         return
@@ -4587,11 +4501,11 @@ def main():
     request = HTTPXRequest(connect_timeout=60, read_timeout=60, write_timeout=60, pool_timeout=60)
     app = Application.builder().token(TOKEN).request(request).get_updates_request(request).build()
     app.add_handler(
-    CallbackQueryHandler(
-        advanced_report_page_callback,
-        pattern=r"^advanced_report_page:"
+        CallbackQueryHandler(
+            advanced_report_page_callback,
+            pattern=r"^advanced_report_page:"
+        )
     )
-)
     app.add_handler(CommandHandler("start", start))
     
     app.add_error_handler(error_handler)
