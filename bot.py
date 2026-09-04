@@ -3,7 +3,7 @@ import threading
 import re
 import logging
 import jdatetime
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time as dtime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from supabase import create_client, Client
@@ -4454,6 +4454,76 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ==========================================
+# یادآور شبانه هزینه‌ها
+# ==========================================
+def build_quick_expense_buttons():
+    """دکمه‌های هزینه‌های سریع برای ثبت یک‌کلیکی"""
+    quick_items = get_quick_expenses(ALLOWED_USER_ID)
+
+    buttons = []
+    row = []
+    for item in quick_items:
+        row.append(InlineKeyboardButton(
+            f"{item['name']} ({item['amount']:,})",
+            callback_data=f"quick_{item['id']}"
+        ))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
+    return buttons
+
+
+async def nightly_reminder(context: ContextTypes.DEFAULT_TYPE):
+    """یادآور شبانه ۲۲:۰۰ — خلاصه امروز + هشدار اگر چیزی ثبت نشده"""
+    user_id = ALLOWED_USER_ID
+    today = datetime.now(TEHRAN_TZ).strftime("%Y-%m-%d")
+
+    try:
+        rows = get_expenses_in_range(user_id, today, today)
+    except Exception:
+        logger.exception("خطا در دریافت هزینه‌های امروز برای یادآور")
+        return
+
+    today_jalali = to_jalali(today)
+    buttons = build_quick_expense_buttons()
+
+    if rows:
+        total = sum(row["amount"] for row in rows)
+        text = (
+            f"🌙 خلاصه امروز — {today_jalali}\n\n"
+            f"🧾 {len(rows)} هزینه ثبت کردی\n"
+            f"💰 مجموع: {total:,} تومان\n\n"
+        )
+        for row in rows[:7]:
+            _, amount, description, category, _ = (
+                row["id"], row["amount"], row["description"],
+                row["category"], row["created_at"]
+            )
+            text += f"• {category} — {amount:,} تومان ({description})\n"
+        if len(rows) > 7:
+            text += f"… و {len(rows) - 7} مورد دیگر\n"
+        text += "\n چیز دیگری ثبت نشده؟ از دکمه‌های زیر استفاده کن:"
+    else:
+        text = (
+            f"🌙 یادآور — {today_jalali}\n\n"
+            "⚠️ امروز هیچ هزینه‌ای ثبت نکردی!\n\n"
+            "اگر هزینه‌ای داشتی، الان ثبتش کن:"
+        )
+
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=text,
+            reply_markup=InlineKeyboardMarkup(buttons) if buttons else None
+        )
+    except Exception:
+        logger.exception("خطا در ارسال یادآور شبانه")
+
+
+# ==========================================
 # Health Server برای Render
 # ==========================================
 
@@ -4505,6 +4575,17 @@ def main():
     main_request = HTTPXRequest(connect_timeout=60, read_timeout=60, write_timeout=60, pool_timeout=60)
     updates_request = HTTPXRequest(connect_timeout=60, read_timeout=60, write_timeout=60, pool_timeout=60)
     app = Application.builder().token(TOKEN).request(main_request).get_updates_request(updates_request).build()
+
+    if app.job_queue:
+        app.job_queue.run_daily(
+            nightly_reminder,
+            time=dtime(hour=22, minute=0, tzinfo=TEHRAN_TZ),
+            chat_id=ALLOWED_USER_ID,
+            name="nightly_expense_reminder"
+        )
+        logger.info("یادآور شبانه تنظیم شد: ۲۲:۰۰ به وقت تهران")
+    else:
+        logger.warning("JobQueue در دسترس نیست؛ یادآور شبانه غیرفعال است (python-telegram-bot[job-queue] نصب کنید)")
     app.add_handler(
         CallbackQueryHandler(
             advanced_report_page_callback,
