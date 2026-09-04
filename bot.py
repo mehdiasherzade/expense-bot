@@ -220,6 +220,7 @@ def rename_category(category_id, new_name):
     try:
         supabase.table("categories").update({"name": new_name}).eq("id", category_id).execute()
         supabase.table("expenses").update({"category": new_name}).eq("category", old_name).execute()
+        supabase.table("quick_expenses").update({"category": new_name}).eq("category", old_name).execute()
         return True
     except Exception as e:
         logger.exception(f"خطا در تغییر نام دسته: {e}")
@@ -239,6 +240,7 @@ def delete_category(category_id):
     if category_name == other_name:
         return False
     supabase.table("expenses").update({"category": other_name}).eq("category", category_name).execute()
+    supabase.table("quick_expenses").update({"category": other_name}).eq("category", category_name).execute()
     supabase.table("categories").delete().eq("id", category_id).execute()
     return True
     
@@ -302,39 +304,6 @@ def get_recent_expenses(user_id, limit=10):
     response = supabase.table("expenses").select("*").eq("user_id", user_id).order("id", desc=True).limit(limit).execute()
     return [(row["id"], row["amount"], row["description"], row["category"], row["created_at"]) for row in response.data]
 
-def get_day_expenses(user_id, date_text):
-    # بازه‌ی دقیق یک روز؛ مستقل از طول زمان/میلی‌ثانیه‌ی created_at
-    response = (
-        supabase.table("expenses")
-        .select("*")
-        .eq("user_id", user_id)
-        .gte("created_at", f"{date_text} 00:00:00{TEHRAN_OFFSET}")
-        .lt("created_at", f"{next_day_text(date_text)} 00:00:00{TEHRAN_OFFSET}")
-        .order("id", desc=True)
-        .execute()
-    )
-    return [(row["id"], row["amount"], row["description"], row["category"], row["created_at"]) for row in response.data]
-
-def get_month_expenses(user_id, month_text):
-    # ماه را با اولین روز ماه بعد محدود می‌کنیم؛ بنابراین برای فوریه، آوریل و ... هم درست است.
-    first_day = datetime.strptime(f"{month_text}-01", "%Y-%m-%d")
-    if first_day.month == 12:
-        next_month = first_day.replace(year=first_day.year + 1, month=1, day=1)
-    else:
-        next_month = first_day.replace(month=first_day.month + 1, day=1)
-    next_month_text = next_month.strftime("%Y-%m-%d")
-
-    response = (
-        supabase.table("expenses")
-        .select("*")
-        .eq("user_id", user_id)
-        .gte("created_at", f"{month_text}-01 00:00:00{TEHRAN_OFFSET}")
-        .lt("created_at", f"{next_month_text} 00:00:00{TEHRAN_OFFSET}")
-        .order("id", desc=True)
-        .execute()
-    )
-    return response.data
-
 def get_expenses_in_range(user_id, start_date, end_date):
     """دریافت هزینه‌های یک بازه (نیمه‌باز: از ابتدای روز شروع تا ابتدای روز بعد از پایان)."""
     response = (
@@ -360,7 +329,7 @@ def compute_stats(rows):
     daily = {}
     category = {}
     for row in rows:
-        date_key = row["created_at"][:10]
+        date_key = tehran_datetime_parts(row["created_at"])[0]
         daily[date_key] = daily.get(date_key, 0) + row["amount"]
         cat = row["category"]
         if cat not in category:
@@ -457,6 +426,26 @@ def to_jalali(date_str):
     except Exception:
         # اگر خطایی رخ داد، همان تاریخ میلادی را برگردان
         return date_str[:10] if len(date_str) >= 10 else ""
+
+
+def tehran_datetime_parts(created_at):
+    """برگرداندن (تاریخ، ساعت) به وقت تهران از created_at، مستقل از نوع ستون."""
+    if not created_at:
+        return "", ""
+    text = str(created_at).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    text = text.replace("T", " ")
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return (
+            text[:10] if len(text) >= 10 else "",
+            text[11:16] if len(text) >= 16 else ""
+        )
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(TEHRAN_TZ)
+    return dt.strftime("%Y-%m-%d"), dt.strftime("%H:%M")
 
 
 def parse_date_input(date_text):
@@ -665,6 +654,8 @@ async def quick_expenses_menu(update, context):
     if not is_allowed(user_id):
         return
 
+    context.user_data.clear()
+
     await render_quick_expenses_menu(update, context)
 
 
@@ -838,6 +829,63 @@ async def advanced_quick_callback(update, context):
         end_date,
         from_callback=True
     )
+TELEGRAM_TEXT_LIMIT = 4096
+
+def build_report_stats_text(
+    title,
+    start_jalali,
+    end_jalali,
+    stats,
+    category_rows_sorted,
+    daily_rows
+):
+    """متن گزارش پیشرفته با برش ایمن بخش‌های روند روزانه برای حد ۴۰۹۶ کاراکتر."""
+    total, count, average, maximum = stats
+
+    text = f"{title}\n\n"
+    text += f"📅 از {start_jalali}\n"
+    text += f"📅 تا {end_jalali}\n\n"
+
+    text += "━━━━━━━━━━━━\n"
+    text += f"💵 مجموع: {total:,} تومان\n"
+    text += f"🧾 تعداد: {count}\n"
+    text += f"📊 میانگین هر هزینه: {average:,}\n"
+    text += f"🔝 بیشترین هزینه: {maximum:,}\n\n"
+
+    text += "━━━━━━━━━━━━\n"
+    text += "📊 بر اساس دسته‌بندی\n\n"
+
+    for category, amount, cnt in category_rows_sorted:
+        entry = f"{category}\n💰 {amount:,} تومان ({cnt} مورد)\n\n"
+        if len(text) + len(entry) > TELEGRAM_TEXT_LIMIT - 600:
+            text += "…\n\n"
+            break
+        text += entry
+
+    if daily_rows:
+        daily_text = "━━━━━━━━━━━━\n📅 روند روزانه\n\n"
+        daily_rows_sorted = sorted(
+            daily_rows,
+            key=lambda x: x[0],
+            reverse=True
+        )
+
+        shown = 0
+        for date_text, amount, _ in daily_rows_sorted:
+            entry = f"{to_jalali(date_text)}: {amount:,} تومان\n"
+            if len(text) + len(daily_text) + len(entry) > TELEGRAM_TEXT_LIMIT - 600:
+                remaining = len(daily_rows_sorted) - shown
+                if remaining > 0:
+                    daily_text += f"… و {remaining} روز دیگر\n"
+                break
+            daily_text += entry
+            shown += 1
+
+        if shown > 0:
+            text += daily_text
+
+    return text
+
 def build_advanced_report_page(text, expense_rows, page=0):
     """ساخت صفحه لیست هزینه‌های گزارش پیشرفته"""
 
@@ -865,14 +913,8 @@ def build_advanced_report_page(text, expense_rows, page=0):
         category = row.get("category", "📦 سایر")
         created_at = row.get("created_at", "")
 
-        expense_date = created_at[:10] if created_at else ""
-        expense_date_jalali = to_jalali(expense_date)
-
-        expense_time = (
-            created_at[11:16]
-            if created_at and len(created_at) >= 16
-            else ""
-        )
+        expense_date_jalali, expense_time = tehran_datetime_parts(created_at)
+        expense_date_jalali = to_jalali(expense_date_jalali)
 
         text += f"#{display_number} {category}\n"
         text += f"💰 {amount:,} تومان\n"
@@ -968,40 +1010,14 @@ async def show_advanced_report(update, context, start_date, end_date, from_callb
     else:
         report_title = "📅 گزارش بر اساس تاریخ"
 
-    # ساخت بخش ثابت گزارش
-    text = f"{report_title}\n\n"
-    text += f"📅 از {start_jalali}\n"
-    text += f"📅 تا {end_jalali}\n\n"
-
-    # آمار کلی
-    text += "━━━━━━━━━━━━\n"
-    text += f"💵 مجموع: {total:,} تومان\n"
-    text += f"🧾 تعداد: {count}\n"
-    text += f"📊 میانگین هر هزینه: {average:,}\n"
-    text += f"🔝 بیشترین هزینه: {maximum:,}\n\n"
-
-    # بر اساس دسته‌بندی
-    text += "━━━━━━━━━━━━\n"
-    text += "📊 بر اساس دسته‌بندی\n\n"
-
-    for category, amount, cnt in category_rows_sorted:
-        text += f"{category}\n"
-        text += f"💰 {amount:,} تومان ({cnt} مورد)\n\n"
-
-    # روند روزانه
-    if daily_rows:
-        text += "━━━━━━━━━━━━\n"
-        text += "📅 روند روزانه\n\n"
-
-        daily_rows_sorted = sorted(
-            daily_rows,
-            key=lambda x: x[0],
-            reverse=True
-        )
-
-        for date_text, amount, _ in daily_rows_sorted:
-            date_jalali = to_jalali(date_text)
-            text += f"{date_jalali}: {amount:,} تومان\n"
+    text = build_report_stats_text(
+        report_title,
+        start_jalali,
+        end_jalali,
+        (total, count, average, maximum),
+        category_rows_sorted,
+        daily_rows
+    )
 
     # نمایش صفحه اول لیست هزینه‌ها
     text, buttons = build_advanced_report_page(
@@ -1087,38 +1103,14 @@ async def advanced_report_page_callback(update, context):
         report_title = "📅 گزارش بر اساس تاریخ"
 
     # ساخت گزارش ثابت
-    text = f"{report_title}\n\n"
-    text += f"📅 از {start_jalali}\n"
-    text += f"📅 تا {end_jalali}\n\n"
-
-    text += "━━━━━━━━━━━━\n"
-    text += f"💵 مجموع: {total:,} تومان\n"
-    text += f"🧾 تعداد: {count}\n"
-    text += f"📊 میانگین هر هزینه: {average:,}\n"
-    text += f"🔝 بیشترین هزینه: {maximum:,}\n\n"
-
-    # دسته‌بندی‌ها
-    text += "━━━━━━━━━━━━\n"
-    text += "📊 بر اساس دسته‌بندی\n\n"
-
-    for category, amount, cnt in category_rows_sorted:
-        text += f"{category}\n"
-        text += f"💰 {amount:,} تومان ({cnt} مورد)\n\n"
-
-    # روند روزانه
-    if daily_rows:
-        text += "━━━━━━━━━━━━\n"
-        text += "📅 روند روزانه\n\n"
-
-        daily_rows_sorted = sorted(
-            daily_rows,
-            key=lambda x: x[0],
-            reverse=True
-        )
-
-        for date_text, amount, _ in daily_rows_sorted:
-            date_jalali = to_jalali(date_text)
-            text += f"{date_jalali}: {amount:,} تومان\n"
+    text = build_report_stats_text(
+        report_title,
+        start_jalali,
+        end_jalali,
+        (total, count, average, maximum),
+        category_rows_sorted,
+        daily_rows
+    )
 
     # ساخت صفحه موردنظر
     text, buttons = build_advanced_report_page(
@@ -1589,9 +1581,8 @@ async def show_category_report(
     )
     
     for display_number, (expense_id, amount, description, category, created_at) in enumerate(page_rows, start=offset + 1):
-        expense_date = created_at[:10] if created_at else ""
-        expense_date_jalali = to_jalali(expense_date)
-        expense_time = created_at[11:16] if created_at and len(created_at) >= 16 else ""
+        expense_date_jalali, expense_time = tehran_datetime_parts(created_at)
+        expense_date_jalali = to_jalali(expense_date_jalali)
         
         text += f"#{display_number}\n💰 {amount:,} تومان\n📝 {description}\n📅 {expense_date_jalali}"
         if expense_time:
@@ -1740,6 +1731,7 @@ async def edit_delete_menu(update, context):
     if not is_allowed(user_id):
         return
 
+    context.user_data.clear()
     page = context.user_data.get("edit_page", 0)
     await render_edit_delete_menu(update, context, page)
 
@@ -1842,6 +1834,7 @@ def settings_markup():
 
 
 async def settings(update, context):
+    context.user_data.clear()
     await update.message.reply_text(
         "⚙️ تنظیمات",
         reply_markup=settings_markup()
@@ -1873,7 +1866,7 @@ def keywords_menu_markup():
     ])
 
 
-async def build_keywords_menu_text():
+def build_keywords_menu_text():
     """متن منوی مدیریت کلمات کلیدی با لیست کلمات هر دسته"""
     categories = get_categories()
     text = "🔑 مدیریت کلمات دسته‌بندی\n\n"
@@ -1913,7 +1906,7 @@ async def manage_keywords(update, context):
     if not is_allowed(user_id):
         return
 
-    text = await build_keywords_menu_text()
+    text = build_keywords_menu_text()
 
     await query.edit_message_text(
         text,
@@ -2818,28 +2811,25 @@ async def export_excel(update, context, from_callback=False):
             )
         return
 
-    current_month = datetime.now(TEHRAN_TZ)
-    month = current_month.strftime("%Y-%m")
-
     try:
-        # ==========================================
-        # محاسبه بازه ماه
-        # ==========================================
-        start_date = f"{month}-01 00:00:00"
-
-        if current_month.month == 12:
-            next_month = current_month.replace(
-                year=current_month.year + 1,
-                month=1,
-                day=1
-            )
+        today = datetime.now(TEHRAN_TZ)
+        today_jalali = jdatetime.date.fromgregorian(date=today.date())
+        month_start_jalali = jdatetime.date(
+            today_jalali.year,
+            today_jalali.month,
+            1
+        )
+        if today_jalali.month == 12:
+            next_month_jalali = jdatetime.date(today_jalali.year + 1, 1, 1)
         else:
-            next_month = current_month.replace(
-                month=current_month.month + 1,
-                day=1
-            )
+            next_month_jalali = jdatetime.date(today_jalali.year, today_jalali.month + 1, 1)
 
-        end_date = next_month.strftime("%Y-%m-%d 00:00:00")
+        month_start_text = month_start_jalali.togregorian().strftime("%Y-%m-%d")
+        next_month_text = next_month_jalali.togregorian().strftime("%Y-%m-%d")
+        jalali_month = f"{today_jalali.year:04d}-{today_jalali.month:02d}"
+
+        start_date = f"{month_start_text} 00:00:00{TEHRAN_OFFSET}"
+        end_date = f"{next_month_text} 00:00:00{TEHRAN_OFFSET}"
 
         logger.info(
             f"Export Excel | user={user_id} | "
@@ -2896,13 +2886,6 @@ async def export_excel(update, context, from_callback=False):
         # ==========================================
         # عنوان فایل
         # ==========================================
-                # تبدیل ماه به شمسی برای عنوان
-        month_parts = month.split('-')
-        year, month_num = int(month_parts[0]), int(month_parts[1])
-        gregorian_date = datetime(year, month_num, 1)
-        jalali_date = jdatetime.date.fromgregorian(date=gregorian_date)
-        jalali_month = f"{jalali_date.year:04d}-{jalali_date.month:02d}"
-        
         ws.merge_cells("A1:F1")
         ws["A1"] = f"💰 گزارش هزینه‌های ماه {jalali_month}"
 
@@ -2977,14 +2960,8 @@ async def export_excel(update, context, from_callback=False):
 
             created_at = str(row.get("created_at", ""))
 
-            # استفاده از تابع تبدیل به شمسی
-            date_part = to_jalali(created_at)
-
-            time_part = (
-                created_at[11:16]
-                if len(created_at) >= 16
-                else ""
-            )
+            date_text, time_part = tehran_datetime_parts(created_at)
+            date_part = to_jalali(date_text)
 
             amount = int(row.get("amount", 0))
 
@@ -3463,6 +3440,8 @@ async def reports_menu(update, context):
     if not is_allowed(user_id):
         return
 
+    context.user_data.clear()
+
     await update.message.reply_text(
         REPORTS_MENU_TEXT,
         reply_markup=reports_menu_markup()
@@ -3491,6 +3470,7 @@ async def reports_callback(update, context):
             from_callback=True
         )
 
+        return
 
     # ==========================================
     # هزینه‌های اخیر
@@ -3516,13 +3496,9 @@ async def reports_callback(update, context):
 
         for display_number, (expense_id, amount, description, category, created_at) in enumerate(rows, start=1):
 
-            date_part = to_jalali(created_at)
+            date_text, time = tehran_datetime_parts(created_at)
 
-            time = (
-                 created_at[11:16]
-                if len(created_at) >= 16
-                else ""
-            )
+            date_part = to_jalali(date_text)
 
             text += (
                 f"#{display_number} {category}\n"
@@ -3601,7 +3577,7 @@ async def reports_callback(update, context):
         today_rows = [
             row
             for row in rows
-            if str(row["created_at"]).startswith(today)
+            if tehran_datetime_parts(row["created_at"])[0] == today
         ]
 
         today_count = len(today_rows)
@@ -3611,13 +3587,33 @@ async def reports_callback(update, context):
             for row in today_rows
         )
 
-        # ماه جاری
-        month = today[:7]
+        # ماه جاری (شمسی، هماهنگ با بقیه گزارش‌ها)
+        today_jalali_date = jdatetime.date.fromgregorian(
+            date=datetime.strptime(today, "%Y-%m-%d").date()
+        )
+
+        month_start_jalali = jdatetime.date(
+            today_jalali_date.year,
+            today_jalali_date.month,
+            1
+        )
+
+        if today_jalali_date.month == 12:
+            next_month_jalali = jdatetime.date(today_jalali_date.year + 1, 1, 1)
+        else:
+            next_month_jalali = jdatetime.date(
+                today_jalali_date.year,
+                today_jalali_date.month + 1,
+                1
+            )
+
+        month_start = month_start_jalali.togregorian().strftime("%Y-%m-%d")
+        next_month_start = next_month_jalali.togregorian().strftime("%Y-%m-%d")
 
         month_rows = [
             row
             for row in rows
-            if str(row["created_at"]).startswith(month)
+            if month_start <= tehran_datetime_parts(row["created_at"])[0] < next_month_start
         ]
 
         month_count = len(month_rows)
@@ -3650,7 +3646,7 @@ async def reports_callback(update, context):
                 reverse=True
             )
 
-            for category, amount in sorted_categories:
+            for category, amount in sorted_categories[:15]:
                 percentage = (
                     (amount / total) * 100
                     if total > 0
@@ -3661,6 +3657,14 @@ async def reports_callback(update, context):
                     f"{category}\n"
                     f"💰 {amount:,} تومان "
                     f"({percentage:.1f}٪)\n\n"
+                )
+
+            if len(sorted_categories) > 15:
+                hidden_count = len(sorted_categories) - 15
+                hidden_total = sum(a for _, a in sorted_categories[15:])
+                category_text += (
+                    f"و {hidden_count} دسته دیگر\n"
+                    f"💰 {hidden_total:,} تومان\n\n"
                 )
         today_jalali = to_jalali(today)
 
@@ -3680,7 +3684,7 @@ async def reports_callback(update, context):
         text += f"🧾 {today_count} هزینه\n"
         text += f"💰 {today_total:,} تومان\n\n"
 
-        text += "📅 این ماه\n"
+        text += "📅 این ماه (شمسی)\n"
         text += f"🧾 {month_count} هزینه\n"
         text += f"💰 {month_total:,} تومان\n"
 
@@ -3767,6 +3771,29 @@ async def handle_message(update, context):
     if message == "🔙 بازگشت":
         await go_back(update, context)
         return
+
+    # ==========================================
+    # منوی اصلی (قبل از stateها تا همیشه کار کند)
+    # ==========================================
+    if message == "📥 ثبت هزینه":
+        await expense_button(update, context)
+        return
+
+    if message == "⚡️ هزینه‌های سریع":
+        await quick_expenses_menu(update, context)
+        return
+
+    if message == "📊 گزارش‌ها":
+        await reports_menu(update, context)
+        return
+
+    if message == "✏️ مدیریت هزینه‌ها":
+        await edit_delete_menu(update, context)
+        return
+
+    if message == "⚙️ تنظیمات":
+        await settings(update, context)
+        return
     # ==========================================
     # ویرایش کلمه کلیدی
     # ==========================================
@@ -3839,7 +3866,7 @@ async def handle_message(update, context):
                 f"✅ کلمه به «{message}» تغییر کرد."
             )
 
-            text = await build_keywords_menu_text()
+            text = build_keywords_menu_text()
 
             await update.message.reply_text(
                 text,
@@ -4106,29 +4133,6 @@ async def handle_message(update, context):
             end_date
         )
 
-        return
-    
-    # ==========================================
-    # منوی اصلی
-    # ==========================================
-    if message == "📥 ثبت هزینه":
-        await expense_button(update, context)
-        return
-    
-    if message == "⚡️ هزینه‌های سریع":
-        await quick_expenses_menu(update, context)
-        return
-    
-    if message == "📊 گزارش‌ها":
-        await reports_menu(update, context)
-        return
-    
-    if message == "✏️ مدیریت هزینه‌ها":
-        await edit_delete_menu(update, context)
-        return
-    
-    if message == "⚙️ تنظیمات":
-        await settings(update, context)
         return
     
     # ==========================================
@@ -4498,8 +4502,9 @@ def main():
     )
     health_thread.start()
     
-    request = HTTPXRequest(connect_timeout=60, read_timeout=60, write_timeout=60, pool_timeout=60)
-    app = Application.builder().token(TOKEN).request(request).get_updates_request(request).build()
+    main_request = HTTPXRequest(connect_timeout=60, read_timeout=60, write_timeout=60, pool_timeout=60)
+    updates_request = HTTPXRequest(connect_timeout=60, read_timeout=60, write_timeout=60, pool_timeout=60)
+    app = Application.builder().token(TOKEN).request(main_request).get_updates_request(updates_request).build()
     app.add_handler(
         CallbackQueryHandler(
             advanced_report_page_callback,
