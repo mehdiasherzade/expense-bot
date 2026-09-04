@@ -90,7 +90,7 @@ def init_db():
         supabase.table("expenses").select("*").limit(1).execute()
     except Exception as e:
         logger.exception(f"خطا در بررسی دیتابیس: {e}")
-        print("⚠️ لطفاً جدول‌ها را در Supabase بسازید!")
+        logger.warning("لطفاً جدول‌ها را در Supabase بسازید!")
         return
 
     # دسته‌بندی‌های پیش‌فرض (فقط در صورت نبودن، اضافه می‌شوند)
@@ -4555,7 +4555,7 @@ class HealthHandler(BaseHTTPRequestHandler):
 def run_health_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), HealthHandler)
-    print(f"Health server running on port {port}")
+    logger.info(f"Health server running on port {port}")
     server.serve_forever()
 
 
@@ -4670,7 +4670,7 @@ def main():
     app.add_handler(CallbackQueryHandler(reports_menu_callback, pattern=r"^reports_menu$"))
     app.add_handler(CallbackQueryHandler(reports_callback, pattern=r"^report_(advanced|recent|stats|category)$"))
    
-    print("✅ ربات اجرا شد!")
+    logger.info("ربات اجرا شد!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
